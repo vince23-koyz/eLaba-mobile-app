@@ -32,7 +32,7 @@ export default function ActionCard() {
                 <Text style={styles.socialLinks}>Read more</Text>
             </TouchableOpacity>
             <TouchableOpacity 
-            //onPress={() => openWebsite('https://www.facebook.com/vincemichael.panton.5')}
+            onPress={() => openWebsite('https://www.facebook.com/vincemichael.panton.5')}
             >
                 <Text style={styles.socialLinks}>Add me on Facebook</Text>
             </TouchableOpacity>
