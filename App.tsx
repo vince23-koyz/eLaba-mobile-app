@@ -1,8 +1,8 @@
 import React from 'react';
-import LoginScreen from './screens/LoginScreen'; // ← change this line
+import WelcomeScreen from './screens/WelcomeScreen';
 
 const App: React.FC = () => {
-  return <LoginScreen />;
+  return <WelcomeScreen />;
 };
 
 export default App;
