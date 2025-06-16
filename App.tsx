@@ -1,8 +1,10 @@
 import React from 'react';
 import WelcomeScreen from './screens/WelcomeScreen';
+import LoginScreen from './screens/LoginScreen';
+import SignupScreen from './screens/SignupScreen';
 
 const App: React.FC = () => {
-  return <WelcomeScreen />;
+  return <SignupScreen/>
 };
 
 export default App;

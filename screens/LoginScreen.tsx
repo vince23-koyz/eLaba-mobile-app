@@ -1,111 +1,154 @@
-import React, { useState } from 'react';
 import {
-  View,
-  Text,
+  Alert,
+  Image,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
-  StatusBar,
-  Alert,
+  View,
 } from 'react-native';
+import React from 'react';
+import LinearGradient from 'react-native-linear-gradient';
+import WashingMachine from '../assets/img/elaba_icon.png';
 
-const LoginScreen: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-
-  const handleLogin = () => {
-    // Later: replace this with API call
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password.');
-      return;
-    }
-    Alert.alert('Login', 'Logging in...');
+export default function LoginScreen() {
+  const handleSignup = () => {
+    console.log('Go to Sign Up screen');
+     Alert.alert('Navigating..', 'Sign Up screen');
+  };
+  const handleForgot = () => {
+    console.log('Go to Recovery screen');
+     Alert.alert('Navigating..', 'Recovery');
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f5f6fa" />
+    <LinearGradient
+      colors={['#a2fff4', '#96bcff']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 0 }}
+      style={styles.container}
+    >
+      <View style={styles.elabaContainer}>
+        <Text style={styles.appTitle}>eLABA: Laundry Booking Services</Text>
+        <Image source={WashingMachine} style={styles.appIcon} />
+        <Text style={styles.login}>Login</Text>
+        <Text style={styles.portal}>Customer Portal</Text>
+      </View>
 
-      <Text style={styles.title}>Login to eLaba</Text>
+      <View style={styles.form}>
+        <Text style={styles.label}>Phone Number</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="+63"
+          placeholderTextColor="#3D3D3D"
+          keyboardType="phone-pad"
+        />
 
-      <TextInput
-        placeholder="Email"
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
+        <Text style={styles.label}>Password</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter your password"
+          placeholderTextColor="#3D3D3D"
+          secureTextEntry
+        />
 
-      <TextInput
-        placeholder="Password"
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
+        <TouchableOpacity onPress={handleForgot}>
+          <Text style={styles.forgotText}>Forgot Password?</Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-        <Text style={styles.loginText}>Login</Text>
-      </TouchableOpacity>
+        <TouchableOpacity style={styles.loginButton}>
+          <Text style={styles.loginButtonText}>Login</Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity style={styles.registerLink}>
-        <Text style={styles.registerText}>
-          Don't have an account? <Text style={styles.link}>Register</Text>
-        </Text>
-      </TouchableOpacity>
-    </View>
+        <View style={styles.signupContainer}>
+          <Text style={styles.signupText}>Don't have an account? </Text>
+          <TouchableOpacity onPress={handleSignup}>
+            <Text style={styles.signupLink}>Sign Up</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </LinearGradient>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f6fa',
-    justifyContent: 'center',
-    paddingHorizontal: 30,
+    paddingHorizontal: 20,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 30,
+  elabaContainer: {
+    alignItems: 'center',
+    marginTop: 80,
+    gap: 10,
+  },
+  appTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    fontStyle: 'italic',
     textAlign: 'center',
   },
-  input: {
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    borderRadius: 10,
-    marginBottom: 15,
+  appIcon: {
+    width: 70,
+    height: 80,
+    borderRadius: 25,
+  },
+  login: {
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  portal: {
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#dcdde1',
+  },
+  form: {
+    width: '100%',
+    backgroundColor: '#ffffff75',
+    borderRadius: 35,
+    padding: 25,
+    marginTop: 40,
+    alignItems: 'center',
+  },
+  label: {
+    fontSize: 16,
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  input: {
+    width: '100%',
+    height: 47,
+    backgroundColor: '#fffcf2',
+    borderRadius: 12,
+    borderWidth: 0.3,
+    borderColor: '#89bfb8',
+    paddingHorizontal: 15,
+    marginBottom: 15,
+  },
+  forgotText: {
+    alignSelf: 'flex-end',
+    color: '#2b7ecb',
+    marginBottom: 20,
   },
   loginButton: {
-    backgroundColor: '#2980b9',
-    paddingVertical: 14,
+    width: '100%',
+    backgroundColor: '#2b7ecb',
+    padding: 12,
     borderRadius: 10,
-    marginTop: 10,
     alignItems: 'center',
+    marginTop: 10,
   },
-  loginText: {
+  loginButtonText: {
     color: '#fff',
     fontWeight: 'bold',
-    fontSize: 16,
   },
-  registerLink: {
+  signupContainer: {
+    flexDirection: 'row',
     marginTop: 20,
-    alignItems: 'center',
   },
-  registerText: {
-    fontSize: 14,
-    color: '#7f8c8d',
+  signupText: {
+    color: '#333',
   },
-  link: {
-    color: '#2980b9',
+  signupLink: {
+    color: '#2b7ecb',
     fontWeight: 'bold',
   },
 });
-
-export default LoginScreen;
