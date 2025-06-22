@@ -11,6 +11,8 @@
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		81F6046B838A4548A91A46FC /* Caprasimo-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A488FFDF8A4844309342FAB5 /* Caprasimo-Regular.ttf */; };
+		78341EA84E844150A0C0B28A /* RobotoMono-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F1B5BEA8EA86439488D679CA /* RobotoMono-Bold.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -35,6 +37,8 @@
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = eLaba/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = eLaba/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		A488FFDF8A4844309342FAB5 /* Caprasimo-Regular.ttf */ = {isa = PBXFileReference; name = "Caprasimo-Regular.ttf"; path = "../assets/fonts/Caprasimo-Regular.ttf"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		F1B5BEA8EA86439488D679CA /* RobotoMono-Bold.ttf */ = {isa = PBXFileReference; name = "RobotoMono-Bold.ttf"; path = "../assets/fonts/RobotoMono-Bold.ttf"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -93,6 +97,7 @@
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				BBD78D7AC51CEA395F1C20DB /* Pods */,
+				A047162212A54575819885D6 /* Resources */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -115,6 +120,16 @@
 			);
 			path = Pods;
 			sourceTree = "<group>";
+		};
+		A047162212A54575819885D6 /* Resources */ = {
+			isa = "PBXGroup";
+			children = (
+				A488FFDF8A4844309342FAB5 /* Caprasimo-Regular.ttf */,
+				F1B5BEA8EA86439488D679CA /* RobotoMono-Bold.ttf */,
+			);
+			name = Resources;
+			sourceTree = "<group>";
+			path = "";
 		};
 /* End PBXGroup section */
 
@@ -185,6 +200,8 @@
 			files = (
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
+				81F6046B838A4548A91A46FC /* Caprasimo-Regular.ttf in Resources */,
+				78341EA84E844150A0C0B28A /* RobotoMono-Bold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

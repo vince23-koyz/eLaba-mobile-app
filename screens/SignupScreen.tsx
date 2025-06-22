@@ -10,15 +10,17 @@ import {
   View,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/Navigator';
 
 export default function SignupScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [smsCode, setSmsCode] = useState('');
-
-  const handleLogin = () => {
-    console.log('Go to Sign Up screen');
-    Alert.alert('Navigating..', 'Login Screen');
-  };
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+      const handleLogin = () => {
+        navigation.navigate('Login')
+      };
 
   const handleSubmit = () => {
     Alert.alert(

@@ -9,13 +9,19 @@ import {
   StatusBar,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import WashingMachine from '../assets/img/elaba_icon.png';
+import WashingMachine from '../assets/img/elaba.png';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/Navigator';
+
 
 
 const WelcomeScreen: React.FC = () => {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const handleGetStarted = () => {
-    Alert.alert('Navigation', 'Redirect to login or next screen...');
+    navigation.navigate('Login');
   };
+
 
   return (
     <LinearGradient
@@ -50,13 +56,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   welcome: {
-    fontSize: 30,
-    fontWeight: 'bold',
+    fontSize: 35,
+    fontFamily: 'Caprasimo-Regular',
     marginTop: 30,
     color: '#2c3e50',
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 20,
     fontStyle: 'italic',
     color: '#34495e',
     marginTop: 5,
@@ -64,9 +70,8 @@ const styles = StyleSheet.create({
   image: {
     marginTop: 130,
     width: 100,
-    height: 110,
-    borderRadius: 25,
-    resizeMode: 'cover',
+    height: 100,
+    resizeMode: 'contain',
   },
   button: {
     backgroundColor: '#ffffff',

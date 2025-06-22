@@ -9,17 +9,22 @@ import {
 } from 'react-native';
 import React from 'react';
 import LinearGradient from 'react-native-linear-gradient';
-import WashingMachine from '../assets/img/elaba_icon.png';
+import WashingMachine from '../assets/img/elaba.png';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/Navigator';
 
 export default function LoginScreen() {
-  const handleSignup = () => {
-    console.log('Go to Sign Up screen');
-     Alert.alert('Navigating..', 'Sign Up screen');
-  };
-  const handleForgot = () => {
-    console.log('Go to Recovery screen');
-     Alert.alert('Navigating..', 'Recovery');
-  };
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+    const handleSignup = () => {
+      navigation.navigate('Signup');
+    };
+    const handleLogin = () => {
+      navigation.navigate('Home')
+    };
+    const handleForgot = () => {
+      Alert.alert('Redirecting', 'Recovery Screen')
+    };
 
   return (
     <LinearGradient
@@ -56,7 +61,7 @@ export default function LoginScreen() {
           <Text style={styles.forgotText}>Forgot Password?</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.loginButton}>
+        <TouchableOpacity onPress={handleLogin} style={styles.loginButton}>
           <Text style={styles.loginButtonText}>Login</Text>
         </TouchableOpacity>
 
@@ -89,8 +94,8 @@ const styles = StyleSheet.create({
   },
   appIcon: {
     width: 70,
-    height: 80,
-    borderRadius: 25,
+    height: 70,
+    resizeMode: 'center'
   },
   login: {
     fontSize: 24,
