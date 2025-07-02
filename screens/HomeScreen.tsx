@@ -39,7 +39,7 @@ export default function HomeScreen() {
       style={styles.container}
     >
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
           {/* HEADER */}
           <View style={styles.header}>
             <View style={styles.headerContent}>
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
   },
   footerContainer: {
     height: 75,
-    backgroundColor: '#f6f6f6',
+    backgroundColor: '#ffffff',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

@@ -42,7 +42,7 @@ export default function BottomTabs() {
                   source={iconPath}
                   style={[
                     styles.iconImage,
-                    { tintColor: focused ? '#3ec6ff' : '#bbb' },
+                    { tintColor: focused ? '#3ec6ff' : '#595959' },
                   ]}
                 />
               </View>
@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     height: 80,
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffffea',
     borderRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
   iconLabel: {
     fontSize: 10,
     marginTop: 2,
-    color: '#999',
+    color: '#595959',
     fontWeight: '500',
     lineHeight: 14,
   },
