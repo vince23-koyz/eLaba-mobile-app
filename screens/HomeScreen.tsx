@@ -1,4 +1,5 @@
-import React from 'react';
+//HomeScreen.tsx
+import React, { useRef, useEffect, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,29 +8,95 @@ import {
   SafeAreaView,
   Image,
   TouchableOpacity,
-  Alert,
+  Platform,
+  RefreshControl,
+  BackHandler,
+  ToastAndroid
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/Navigator';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import WashingMachine from '../assets/img/elaba.png';
-import MessageIcon from '../assets/img/message_icon.png';
-import DryCleanIcon from '../assets/img/dry.png';
-import LaundryIcon from '../assets/img/wash.png';
-import IronIcon from '../assets/img/iron.png';
-import FavoriteIcon from '../assets/img/icon/favorite-icon.png';
-import BhiveImage from '../assets/img/bhive.png';
-import TayNicks from '../assets/img/taynicks.png';
-import SitandSpin from '../assets/img/sitspin.png';
-import WashnFold from '../assets/img/washnfold.png';
-import Geofer from '../assets/img/geofer.png';
+import ShopCard from '../components/ShopCard';
+import useShops from '../hook/useShops';
+
+
+type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export default function HomeScreen() {
-  const BookButton = () => {
-    Alert.alert('Booking...', 'Navigating to Laundry Shop Details');
+  const scrollRef = useRef<ScrollView>(null);
+  const navigation = useNavigation<HomeScreenNavigationProp>();
+  const isFocused = useIsFocused();
+  const [refreshing, setRefreshing] = useState(false);
+  const [firstLoad, setFirstLoad] = useState(true);
+  const lastBackPress = useRef(0);
+
+  const { shops, loading, error, refresh } = useShops();
+
+  const [customerName, setCustomerName] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadCustomerName = async () => {
+      try {
+        const name = await AsyncStorage.getItem('customerName');
+        if (name) {
+          setCustomerName(name);
+        }
+      } catch (e) {
+        console.log("Error loading customer name:", e);
+      }
+    };
+
+    loadCustomerName();
+  }, []);
+
+  const handleMessages = () => {
+    navigation.navigate('Messaging');
   };
-  const HandleMessages = () => {
-    Alert.alert('Messages', 'Navigating to Messaging Screen');
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
   };
+  useEffect(() => {
+    if (isFocused) {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      onRefresh();
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
+    if (isFocused) {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      if (firstLoad) {
+        onRefresh();
+        setFirstLoad(false);
+      }
+    }
+  }, [isFocused, firstLoad]);
+
+useEffect(() => {
+  if (!isFocused) return; 
+
+  const backAction = () => {
+
+    const now = Date.now();
+    if (now - lastBackPress.current < 2000) {
+      BackHandler.exitApp();
+      return true;
+    } else {
+      lastBackPress.current = now;
+      ToastAndroid.show('Press back again to exit', ToastAndroid.SHORT);
+      return true;
+    }
+  };
+
+  const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+  return () => backHandler.remove();
+}, [isFocused]);
 
   return (
     <LinearGradient
@@ -39,20 +106,38 @@ export default function HomeScreen() {
       style={styles.container}
     >
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#3ec6ff']}
+              tintColor="#3ec6ff"
+            />
+          }
+        >
           {/* HEADER */}
           <View style={styles.header}>
             <View style={styles.headerContent}>
               <View style={styles.leftContainer}>
-                <Image source={WashingMachine} style={styles.appIcon} />
+                <Image source={require('../assets/img/elaba.png')} style={styles.appIcon} />
                 <Text style={styles.headerTitle}>eLaba</Text>
               </View>
-              <TouchableOpacity onPress={HandleMessages}>
-                <Image source={MessageIcon} style={styles.messageIcon} />
+              <TouchableOpacity onPress={handleMessages} style={styles.messageContainer}>
+                <Image source={require('../assets/img/icon/message.png')} style={styles.messageIcon} />
               </TouchableOpacity>
             </View>
 
-            <View style={styles.rectangleLine}></View>
+            <View style={styles.rectangleLine}>
+              <Text style={styles.welcomeText}>
+                {customerName
+                  ? `Hello, ${customerName}`
+                  : 'Hello, Guest'}
+              </Text>
+            </View>
 
             <Text style={styles.welcomeText}>
               Welcome! Find the best deals at your favorite laundry shops
@@ -60,9 +145,9 @@ export default function HomeScreen() {
 
             <View style={styles.cardContainer}>
               {[
-                { icon: DryCleanIcon, label: 'Dry Clean' },
-                { icon: LaundryIcon, label: 'Laundry' },
-                { icon: IronIcon, label: 'Iron' },
+                { icon: require('../assets/img/dry.png'), label: 'Dry Clean' },
+                { icon: require('../assets/img/wash.png'), label: 'Laundry' },
+                { icon: require('../assets/img/iron.png'), label: 'Iron' },
               ].map((item, index) => (
                 <TouchableOpacity key={index} activeOpacity={0.8}>
                   <View style={[styles.card, styles.cardElevated]}>
@@ -72,6 +157,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
           </View>
 
           {/* SECTION LABEL */}
@@ -79,84 +165,40 @@ export default function HomeScreen() {
             <Text style={styles.selectText}>Select Laundry Shops</Text>
           </View>
 
-          {/* SHOP CARD */}
-          <View style={styles.shopCard}>
-            <View style={styles.imageWrapper}>
-              <Image source={BhiveImage} style={styles.shopImage} />
-              <Image source={FavoriteIcon} style={styles.favoriteIcon} />
-            </View>
-            <View style={styles.footerContainer}>
-              <Text style={styles.shopName}>B-Hive Laundry Shop</Text>
-              <TouchableOpacity onPress={BookButton} style={styles.bookBtn}>
-                <Text style={styles.textBtn}>Book</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          {/* SHOP CARDS */}
+          {loading && <Text style={{ textAlign: 'center', marginTop: 10 }}>Loading shops...</Text>}
+          {error && <Text style={{ color: 'red', textAlign: 'center', marginTop: 10 }}>{error}</Text>}
+          {!loading && shops.length === 0 && (
+            <Text style={{ textAlign: 'center', marginTop: 10 }}>No shops available.</Text>
+          )}
 
-          <View style={styles.shopCard}>
-            <View style={styles.imageWrapper}>
-              <Image source={TayNicks} style={styles.shopImage} />
-              <Image source={FavoriteIcon} style={styles.favoriteIcon} />
-            </View>
-            <View style={styles.footerContainer}>
-              <Text style={styles.shopName}>Tay Nick's Laundry Shop</Text>
-              <TouchableOpacity onPress={BookButton} style={styles.bookBtn}>
-                <Text style={styles.textBtn}>Book</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          {shops.map((shop) => (
+            <ShopCard
+              key={shop.shop_id} 
+              name={shop.name}
+              address={shop.address}
+              onPress={() => navigation.navigate('ShopDetails', { shop_id: shop.shop_id })}
+            />
+          ))}
 
-          <View style={styles.shopCard}>
-            <View style={styles.imageWrapper}>
-              <Image source={SitandSpin} style={styles.shopImage} />
-              <Image source={FavoriteIcon} style={styles.favoriteIcon} />
-            </View>
-            <View style={styles.footerContainer}>
-              <Text style={styles.shopName}>Sit and Spin Laundry Shop</Text>
-              <TouchableOpacity onPress={BookButton} style={styles.bookBtn}>
-                <Text style={styles.textBtn}>Book</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.shopCard}>
-            <View style={styles.imageWrapper}>
-              <Image source={WashnFold} style={styles.shopImage} />
-              <Image source={FavoriteIcon} style={styles.favoriteIcon} />
-            </View>
-            <View style={styles.footerContainer}>
-              <Text style={styles.shopName}>Wash n Fold Laundry Shop</Text>
-              <TouchableOpacity onPress={BookButton} style={styles.bookBtn}>
-                <Text style={styles.textBtn}>Book</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.shopCard}>
-            <View style={styles.imageWrapper}>
-              <Image source={Geofer} style={styles.shopImage} />
-              <Image source={FavoriteIcon} style={styles.favoriteIcon} />
-            </View>
-            <View style={styles.footerContainer}>
-              <Text style={styles.shopName}>Geofer Wash n Laundry Shop</Text>
-              <TouchableOpacity onPress={BookButton} style={styles.bookBtn}>
-                <Text style={styles.textBtn}>Book</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          {/* FADE EFFECT */}
+          <LinearGradient
+            colors={['transparent', 'rgba(150, 188, 255, 0.5)']}
+            style={styles.fadeBottom}
+            pointerEvents="none"
+          />
         </ScrollView>
       </SafeAreaView>
     </LinearGradient>
   );
 }
 
+// Styles same lang as dati
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   scrollContainer: {
     flexGrow: 1,
-    paddingBottom: 40,
+    paddingBottom: 100 + (Platform.OS === 'ios' ? 20 : 10),
   },
   header: {
     width: '100%',
@@ -170,15 +212,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    borderBottomColor: '#ffffff',
+    borderBottomWidth: 0.4,
+    paddingBottom: 10,
   },
-  leftContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  leftContainer: { flexDirection: 'row', alignItems: 'center' },
   appIcon: {
     width: 40,
     height: 40,
-    resizeMode: 'center',
+    resizeMode: 'contain',
     marginRight: 8,
   },
   headerTitle: {
@@ -186,24 +228,36 @@ const styles = StyleSheet.create({
     fontFamily: 'Caprasimo-Regular',
     color: '#FFFFFF',
   },
-  messageIcon: {
-    width: 32,
-    height: 32,
-    tintColor: '#fff',
+  messageContainer: {
+    backgroundColor: '#4ef3ff5f',
+    width: 45,
+    height: 45,
+    borderRadius: 50,
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  messageIcon: { width: 35, height: 35 },
   rectangleLine: {
-    backgroundColor: '#B1D2FF',
+    backgroundColor: '#a5c4fa',
     width: '100%',
-    height: 50,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
     marginTop: 15,
-    borderRadius: 15,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   welcomeText: {
     fontSize: 20,
     fontFamily: 'RobotoMono-Bold',
     color: '#FFFFFF',
-    marginTop: 25,
-    paddingHorizontal: 5,
+    textAlign: 'center',
   },
   cardContainer: {
     flexDirection: 'row',
@@ -227,72 +281,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  cardImage: {
-    width: 50,
-    height: 50,
-    marginBottom: 6,
-    resizeMode: 'contain',
-  },
-  cardText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#2c3e50',
-  },
-  selectContainer: {
-    alignItems: 'center',
-    marginTop: 30,
-  },
-  selectText: {
-    color: '#221f1f',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  shopCard: {
-    backgroundColor: '#ffffff',
-    width: '90%',
-    borderRadius: 20,
-    alignSelf: 'center',
-    marginTop: 20,
-    overflow: 'hidden',
-    elevation: 5,
-  },
-  imageWrapper: {
-    position: 'relative',
-  },
-  shopImage: {
-    width: '100%',
-    height: 170,
-    resizeMode: 'cover',
-  },
-  favoriteIcon: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    width: 25,
-    height: 25,
-    zIndex: 2,
-  },
-  footerContainer: {
-    height: 75,
-    backgroundColor: '#ffffff',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-  },
-  shopName: {
-    fontSize: 16,
-    color: '#333',
-  },
-  bookBtn: {
-    backgroundColor: '#3ec6ff',
-    paddingVertical: 10,
-    paddingHorizontal: 25,
-    borderRadius: 8,
-  },
-  textBtn: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
+  cardImage: { width: 50, height: 50, marginBottom: 6, resizeMode: 'contain' },
+  cardText: { fontSize: 13, fontWeight: '600', color: '#2c3e50' },
+  selectContainer: { alignItems: 'center', marginTop: 30 },
+  selectText: { color: '#221f1f', fontSize: 18, fontWeight: '600' },
+  fadeBottom: { height: 40, marginTop: -40, width: '100%' },
 });

@@ -1,3 +1,4 @@
+//BottomTabs.tsx
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Image, Text, StyleSheet } from 'react-native';
@@ -19,7 +20,7 @@ export default function BottomTabs() {
           let iconPath;
           let label;
 
-          if (route.name === 'Home') {
+          if (route.name === 'HomeTab') {
             iconPath = require('../assets/img/icon/home-icon.png');
             label = 'Home';
           } else if (route.name === 'Notification') {
@@ -50,7 +51,6 @@ export default function BottomTabs() {
                 {label}
               </Text>
 
-              {/* OPTIONAL BADGE for notifications */}
               {route.name === 'Notification' && (
                 <View style={styles.badgeBubble}>
                   <Text style={styles.badgeText}>3</Text>
@@ -61,7 +61,7 @@ export default function BottomTabs() {
         },
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen name="HomeTab" component={HomeScreen} />
       <Tab.Screen name="Notification" component={NotificationScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
