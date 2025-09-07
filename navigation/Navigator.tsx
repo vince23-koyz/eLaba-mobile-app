@@ -20,7 +20,13 @@ export type RootStackParamList = {
   Signup: undefined;
   Home: undefined;
   Messaging: undefined;
-  Convo: undefined;
+  Convo: {
+    shopName: string;
+    shopId: string;
+    receiverId: string;
+    receiverType: 'customer' | 'admin';
+    avatar: any;
+  };
   ShopDetails: { shop_id: number };
   BookingService: { 
     type: 'Walk in' | 'Pick up'; 

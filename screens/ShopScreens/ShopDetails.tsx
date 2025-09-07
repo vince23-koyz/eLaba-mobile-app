@@ -39,7 +39,18 @@ export default function ShopDetailsScreen() {
   const [selectedType, setSelectedType] = useState<'Walk in' | 'Pick up' | null>(null);
 
   const handleMessagePress = () => {
-    navigation.navigate('Convo');
+    if (!shop || !shop.admin_id) {
+      console.log('❌ Shop or admin_id not available:', { shop, admin_id: shop?.admin_id });
+      return;
+    }
+    
+    navigation.navigate('Convo', {
+      shopName: shop.name,
+      shopId: shop_id.toString(),
+      receiverId: shop.admin_id.toString(),
+      receiverType: 'admin' as const,
+      avatar: require('../../assets/img/bhive.png') // You can update this to use shop's actual image
+    });
   };
 
   const onRefresh = async () => {
