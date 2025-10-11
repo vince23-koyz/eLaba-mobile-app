@@ -28,6 +28,11 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
+  const [currentConversation, setCurrentConversation] = useState<{
+    shopId: string;
+    receiverId: string;
+    senderId: string;
+  } | null>(null);
   const messagesRef = useRef<Message[]>([]);
 
   useEffect(() => {
@@ -43,6 +48,33 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
       // Listen for incoming messages
       socketService.onReceiveMessage((newMessage: Message) => {
         console.log('📩 Received message via socket:', newMessage);
+        
+        // Filter messages to only show those that belong to the current conversation
+        if (currentConversation) {
+          const isMessageForCurrentConversation = (
+            newMessage.shop_id === currentConversation.shopId &&
+            (
+              // Message sent by current user
+              (newMessage.sender_id === currentConversation.senderId) ||
+              // Message received by current user from the current conversation partner
+              (newMessage.sender_id === currentConversation.receiverId && 
+               (newMessage.receiver_id === currentConversation.senderId || newMessage.receiver_id === userId))
+            )
+          );
+
+          if (!isMessageForCurrentConversation) {
+            console.log('🚫 Message not for current conversation, ignoring:', {
+              messageShopId: newMessage.shop_id,
+              messageSenderId: newMessage.sender_id,
+              messageReceiverId: newMessage.receiver_id,
+              currentShopId: currentConversation.shopId,
+              currentSenderId: currentConversation.senderId,
+              currentReceiverId: currentConversation.receiverId
+            });
+            return;
+          }
+        }
+        
         setMessages(prev => {
           // Check if message already exists to prevent duplicates
           const exists = prev.some(msg => 
@@ -65,9 +97,10 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
       return () => {
         console.log('🧹 Cleaning up socket listeners');
         socketService.offReceiveMessage();
+        setCurrentConversation(null);
       };
     }
-  }, [userId, userType]);
+  }, [userId, userType, currentConversation?.shopId, currentConversation?.receiverId, currentConversation?.senderId]);
 
   // Send message function
   const sendMessage = async (messageData: Omit<Message, 'id' | 'created_at'>) => {
@@ -119,6 +152,14 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
   const loadConversation = async (customerId: string, adminId: string, shopId: string) => {
     try {
       setLoading(true);
+      
+      // Set current conversation context for message filtering
+      setCurrentConversation({
+        shopId: shopId,
+        receiverId: userType === 'customer' ? adminId : customerId,
+        senderId: userId
+      });
+      
       console.log('📡 Loading conversation with API call:', {
         url: `http://10.0.2.2:5000/api/messages/conversation/${customerId}/${adminId}/${shopId}`,
         customerId,
@@ -199,10 +240,14 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
   // Clear messages (when leaving conversation)
   const clearMessages = () => {
     setMessages([]);
+    setCurrentConversation(null);
   };
 
   // Leave conversation room
   const leaveConversation = (customerId: string, adminId: string, shopId: string) => {
+    // Clear conversation context when leaving
+    setCurrentConversation(null);
+    
     if (userType === 'customer') {
       socketService.leaveConversation(shopId, userId, 'customer', adminId, 'admin');
     } else {

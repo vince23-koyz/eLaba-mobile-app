@@ -13,7 +13,7 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../navigation/Navigator';
+import { RootStackParamList } from '../../navigation/Navigator';
 
 const { height } = Dimensions.get('window');
 
@@ -131,7 +131,7 @@ const WelcomeScreen: React.FC = () => {
             ]}
           >
             <View style={styles.logoWrapper}>
-              <Image source={require('../assets/img/elaba.png')} style={styles.image} />
+              <Image source={require('../../assets/img/elaba.png')} style={styles.image} />
               <View style={styles.logoShadow} />
             </View>
             

@@ -1,9 +1,11 @@
 import { Alert, Image, StyleSheet, Text, TouchableOpacity, View, StatusBar, Dimensions, Modal } from 'react-native'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import socketService from '../services/socketService';
 
 import { RootStackParamList } from '../navigation/Navigator';
 
@@ -13,18 +15,75 @@ export default function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [customerName, setCustomerName] = useState<string | null>(null);
+  const [customerLastName, setCustomerLastName] = useState<string | null>(null);
   const [customerUsername, setCustomerUsername] = useState<string | null>(null);
+  const [profilePicture, setProfilePicture] = useState<string | null>(null);
+  const [imageKey, setImageKey] = useState(Date.now()); // For cache busting
+
+  // Function to get initials from customer first and last name
+  const getInitials = (firstName: string | null, lastName: string | null): string => {
+    if (!firstName && !lastName) return 'NN'; // Default to 'NN' for No Name
+    
+    const firstInitial = firstName ? firstName.charAt(0).toUpperCase() : '';
+    const lastInitial = lastName ? lastName.charAt(0).toUpperCase() : '';
+    
+    if (firstInitial && lastInitial) {
+      return firstInitial + lastInitial;
+    } else if (firstInitial) {
+      return firstInitial;
+    } else if (lastInitial) {
+      return lastInitial;
+    }
+    
+    return 'NN';
+  };
+
+  // Function to get full name
+  const getFullName = (firstName: string | null, lastName: string | null): string => {
+    if (!firstName && !lastName) return 'No Name';
+    
+    const fullName = `${firstName || ''} ${lastName || ''}`.trim();
+    return fullName || 'No Name';
+  };
 
   const handleLogout = () => {
     setShowLogoutModal(true);
   };
 
-  const confirmLogout = () => {
-    setShowLogoutModal(false);
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Login' }],
-    });
+  const confirmLogout = async () => {
+    try {
+      console.log('🚪 [CUSTOMER] User logging out - cleaning up...');
+      
+      // Disconnect from socket and clean up all messaging connections
+      console.log('🔌 Disconnecting from socket service');
+      socketService.disconnect();
+      
+      // Clear all AsyncStorage data
+      console.log('🧹 Clearing AsyncStorage data');
+      await AsyncStorage.multiRemove([
+        'customerId',
+        'customerName', 
+        'customerUsername',
+        'customerEmail',
+        'isLoggedIn'
+      ]);
+      
+      console.log('✅ [CUSTOMER] Logout cleanup complete');
+      
+      setShowLogoutModal(false);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    } catch (error) {
+      console.error('❌ Error during logout cleanup:', error);
+      // Still proceed with logout even if cleanup fails
+      setShowLogoutModal(false);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    }
   };
 
   const cancelLogout = () => {
@@ -32,27 +91,67 @@ export default function ProfileScreen() {
   };
 
   const handleProfile = () => {
-    navigation.navigate('EditProfile')
+    navigation.navigate('MyProfile')
   };
 
   const handleHistory = () => {
     navigation.navigate('Transaction')
   };
 
-  useEffect(() => {
-    const loadCustomerData = async () => {
-      try {
-        const name = await AsyncStorage.getItem('customerName');
-        const username = await AsyncStorage.getItem('customerUsername');
-        if (name) setCustomerName(name);
-        if (username) setCustomerUsername(username);
-      } catch (error) {
-        console.error("Error loading customer data:", error);
+  // Function to load fresh customer data from database
+  const loadCustomerData = useCallback(async () => {
+    try {
+      const customerId = await AsyncStorage.getItem('customerId');
+      
+      if (!customerId) {
+        console.log('No customer ID found');
+        return;
       }
-    };
 
-    loadCustomerData();
+      // Fetch fresh data from database
+      const response = await axios.get(`http://10.0.2.2:5000/api/customers/${customerId}`);
+      
+      if (response.data) {
+        setCustomerName(response.data.first_name);
+        setCustomerLastName(response.data.last_name);
+        setCustomerUsername(response.data.username);
+        setProfilePicture(response.data.profile_picture);
+        // Update imageKey to force image reload if profile picture exists
+        if (response.data.profile_picture) {
+          setImageKey(Date.now());
+        }
+
+        // Also update AsyncStorage with the latest data for consistency
+        await AsyncStorage.multiSet([
+          ['customerName', response.data.first_name || ''],
+          ['customerLastName', response.data.last_name || ''],
+          ['customerUsername', response.data.username || ''],
+        ]);
+      }
+    } catch (error) {
+      console.error("Error loading customer data:", error);
+      
+      // Fallback to AsyncStorage if API fails
+      try {
+        const firstName = await AsyncStorage.getItem('customerName');
+        const lastName = await AsyncStorage.getItem('customerLastName');
+        const username = await AsyncStorage.getItem('customerUsername');
+        
+        if (firstName) setCustomerName(firstName);
+        if (lastName) setCustomerLastName(lastName);
+        if (username) setCustomerUsername(username);
+      } catch (storageError) {
+        console.error("Error loading from AsyncStorage:", storageError);
+      }
+    }
   }, []);
+
+  // Load data when screen comes into focus (including when navigating back)
+  useFocusEffect(
+    useCallback(() => {
+      loadCustomerData();
+    }, [loadCustomerData])
+  );
 
   return (
     <>
@@ -66,14 +165,29 @@ export default function ProfileScreen() {
         {/* Header with Avatar */}
         <View style={styles.headerContainer}>
           <View style={styles.profileImageContainer}>
-            <Image 
-              source={require('../assets/img/default-profile.png')} 
-              style={styles.profileImage} 
-            />
+            <View style={styles.profileAvatar}>
+              {profilePicture ? (
+                <Image 
+                  key={`profile-${profilePicture}-${imageKey}`}
+                  source={{
+                    uri: `http://10.0.2.2:5000/uploads/customer-profile/${profilePicture}?v=${imageKey}`,
+                    cache: 'reload'
+                  }}
+                  style={styles.profileImage}
+                  resizeMode="cover"
+                  onError={() => {
+                    console.log('Failed to load profile image in ProfileScreen:', profilePicture);
+                    setProfilePicture(null);
+                  }}
+                />
+              ) : (
+                <Text style={styles.avatarText}>{getInitials(customerName, customerLastName)}</Text>
+              )}
+            </View>
             <View style={styles.onlineIndicator} />
           </View>
-          <Text style={styles.welcomeText}>Hello!</Text>
-          <Text style={styles.usernameHeader}>{customerUsername}</Text>
+          <Text style={styles.welcomeText}>Welcome back!</Text>
+          <Text style={styles.usernameHeader}>{customerUsername || 'User'}</Text>
         </View>
 
         {/* Profile Card */}
@@ -93,7 +207,7 @@ export default function ProfileScreen() {
             <View style={styles.divider} />
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Full Name</Text>
-              <Text style={styles.infoValue}>{customerName}</Text>
+              <Text style={styles.infoValue}>{getFullName(customerName, customerLastName)}</Text>
             </View>
           </View>
         </View>
@@ -126,6 +240,9 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
         </View>
+
+        {/* Bottom Spacer */}
+        <View style={styles.bottomSpacer} />
 
         {/* Logout Modal */}
         <Modal
@@ -189,133 +306,181 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     alignItems: 'center',
-    paddingTop: height * 0.06,
+    paddingTop: height * 0.07,
     paddingBottom: 25,
+    paddingHorizontal: 20,
   },
   profileImageContainer: {
     position: 'relative',
-    marginBottom: 15,
+    marginBottom: 16,
   },
   profileImage: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 95,
+    height: 95,
+    borderRadius: 47.5,
+  },
+  profileAvatar: {
+    width: 95,
+    height: 95,
+    borderRadius: 47.5,
     borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  avatarText: {
+    fontSize: 34,
+    fontWeight: '700',
+    color: '#667eea',
+    textAlign: 'center',
   },
   onlineIndicator: {
     position: 'absolute',
     bottom: 6,
     right: 6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: '#5ce361',
-    borderWidth: 2,
+    borderWidth: 2.5,
     borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   welcomeText: {
-    fontSize: 14,
+    fontSize: 15,
     color: 'rgba(255, 255, 255, 0.9)',
-    fontWeight: '400',
-    marginBottom: 4,
+    fontWeight: '500',
+    marginTop: 6,
+    letterSpacing: 0.2,
   },
   usernameHeader: {
     fontSize: 20,
     color: '#fff',
     fontWeight: '700',
+    marginTop: 3,
+    letterSpacing: 0.3,
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   profileCard: {
     backgroundColor: '#fff',
     marginHorizontal: 20,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-    shadowColor: '#000',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 22,
+    shadowColor: '#667eea',
     shadowOffset: {
       width: 0,
       height: 3,
     },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 10,
     elevation: 6,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 18,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f8f9fa',
   },
   profileTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#2c3e50',
+    letterSpacing: 0.2,
   },
   editButton: {
-    backgroundColor: '#f8f9fa',
-    padding: 8,
+    backgroundColor: '#667eea',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
     borderRadius: 10,
-    shadowColor: '#000',
+    shadowColor: '#667eea',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.15,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
   editIcon: {
-    width: 18,
-    height: 18,
-    tintColor: '#667eea',
+    width: 16,
+    height: 16,
+    tintColor: '#fff',
   },
   userInfo: {
-    gap: 12,
+    gap: 14,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 3,
   },
   infoLabel: {
     fontSize: 14,
     color: '#7f8c8d',
     fontWeight: '500',
+    letterSpacing: 0.1,
   },
   infoValue: {
     fontSize: 14,
     color: '#2c3e50',
     fontWeight: '600',
+    letterSpacing: 0.1,
+    maxWidth: '60%',
+    textAlign: 'right',
   },
   divider: {
     height: 1,
-    backgroundColor: '#ecf0f1',
-    marginVertical: 6,
+    backgroundColor: '#f1f3f4',
+    marginVertical: 7,
   },
   actionsContainer: {
     paddingHorizontal: 20,
-    gap: 12,
+    gap: 16,
     flex: 1,
+    marginTop: 10,
   },
   actionButton: {
     backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-    shadowColor: '#000',
+    borderRadius: 16,
+    padding: 18,
+    shadowColor: '#667eea',
     shadowOffset: {
       width: 0,
       height: 2,
     },
     shadowOpacity: 0.08,
     shadowRadius: 6,
-    elevation: 3,
+    elevation: 4,
   },
   historyButton: {
-    borderLeftWidth: 3,
+    borderLeftWidth: 4,
     borderLeftColor: '#667eea',
   },
   logoutButton: {
-    borderLeftWidth: 3,
+    borderLeftWidth: 4,
     borderLeftColor: '#e74c3c',
   },
   buttonContent: {
@@ -323,13 +488,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
   buttonIcon: {
     width: 20,
@@ -344,14 +517,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2c3e50',
     marginBottom: 3,
+    letterSpacing: 0.1,
   },
   buttonSubtitle: {
     fontSize: 12,
     color: '#7f8c8d',
     fontWeight: '400',
+    letterSpacing: 0.05,
   },
   chevron: {
-    fontSize: 20,
+    fontSize: 22,
     color: '#bdc3c7',
     fontWeight: '300',
   },
@@ -377,27 +552,35 @@ const styles = StyleSheet.create({
     padding: 0,
     width: '100%',
     maxWidth: 320,
-    shadowColor: '#000',
+    shadowColor: '#667eea',
     shadowOffset: {
       width: 0,
       height: 8,
     },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.2,
     shadowRadius: 16,
-    elevation: 12,
+    elevation: 10,
   },
   modalHeader: {
-    padding: 24,
+    padding: 28,
     alignItems: 'center',
   },
   modalIconContainer: {
-    width: 65,
-    height: 65,
-    borderRadius: 32.5,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     backgroundColor: '#fee8e8',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 18,
+    shadowColor: '#e74c3c',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   },
   modalIcon: {
     width: 30,
@@ -405,18 +588,20 @@ const styles = StyleSheet.create({
     tintColor: '#e74c3c',
   },
   modalTitle: {
-    fontSize: 19,
+    fontSize: 20,
     fontWeight: '700',
     color: '#2c3e50',
-    marginBottom: 10,
+    marginBottom: 12,
     textAlign: 'center',
+    letterSpacing: 0.3,
   },
   modalMessage: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#696969',
     textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: 8,
+    lineHeight: 22,
+    paddingHorizontal: 12,
+    letterSpacing: 0.2,
   },
   modalActions: {
     flexDirection: 'row',
@@ -439,11 +624,11 @@ const styles = StyleSheet.create({
   },
   confirmButton: {
     flex: 1,
-    borderBottomRightRadius: 20,
+    borderBottomRightRadius: 24,
     overflow: 'hidden',
   },
   confirmButtonGradient: {
-    paddingVertical: 15,
+    paddingVertical: 16,
     paddingHorizontal: 16,
     justifyContent: 'center',
     alignItems: 'center',
@@ -452,5 +637,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#fff',
+  },
+  bottomSpacer: {
+    height: 30,
   },
 })

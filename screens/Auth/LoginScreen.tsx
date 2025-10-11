@@ -3,9 +3,10 @@ import { Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } fro
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../navigation/Navigator';
+import { RootStackParamList } from '../../navigation/Navigator';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import messaging from '@react-native-firebase/messaging';
 
 export default function LoginScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -15,11 +16,18 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   const handleSignup = () => navigation.navigate('Signup');
-  const handleForgot = () => Alert.alert('Redirecting', 'Recovery Screen');
+  const handleForgot = () => navigation.navigate('PasswordRecovery');
 
   const handleLogin = async () => {
-    if (!phoneNumber || !password) {
-      Alert.alert('Error', 'Please fill in all fields.');
+    // Check for empty phone number
+    if (!phoneNumber || !phoneNumber.trim()) {
+      Alert.alert('Error', 'Please enter your phone number.');
+      return;
+    }
+
+    // Check for empty password
+    if (!password || !password.trim()) {
+      Alert.alert('Error', 'Please enter your password.');
       return;
     }
 
@@ -33,15 +41,50 @@ export default function LoginScreen() {
       );
 
       if (response.data?.success) {
-        const { first_name, last_name } = response.data.customer;
+        const { customer } = response.data;
 
-        // Save first name and customer_id to AsyncStorage
-        await AsyncStorage.setItem('customerId', response.data.customer.customer_id.toString());
-        await AsyncStorage.setItem('customerName', first_name);
-        await AsyncStorage.setItem('customerLastName', last_name);
-        await AsyncStorage.setItem('customerUsername', response.data.customer.username);
-        //token
-        //await AsyncStorage.setItem('token', response.data.token);
+        // Save basic data to AsyncStorage
+        await AsyncStorage.setItem('customerId', customer.customer_id.toString());
+        await AsyncStorage.setItem('customerName', customer.first_name);
+        await AsyncStorage.setItem('customerLastName', customer.last_name);
+        await AsyncStorage.setItem('customerUsername', customer.username);
+        await AsyncStorage.setItem('customerPhone', customer.phone_number);
+        await AsyncStorage.setItem('customerAddress', customer.address || '');
+        await AsyncStorage.setItem('isLoggedIn', 'true');
+
+        try {
+          // === Get FCM Token ===
+          let fcmToken = await messaging().getToken();
+          if (fcmToken) {
+            console.log('FCM Token:', fcmToken);
+
+            // Save token locally para magamit ulit
+            await AsyncStorage.setItem('fcmToken', fcmToken);
+
+            // Send token to backend
+            await axios.post('http://10.0.2.2:5000/api/notifications/update-device-token', {
+              accountId: customer.customer_id,
+              accountType: 'customer',
+              shopId: null,
+              token: fcmToken,
+            });
+          }
+
+          // === Handle Token Refresh ===
+          messaging().onTokenRefresh(async (newToken) => {
+            console.log('New FCM Token:', newToken);
+            await AsyncStorage.setItem('fcmToken', newToken);
+
+            await axios.post('http://10.0.2.2:5000/api/notifications/update-device-token', {
+              accountId: customer.customer_id,
+              accountType: 'customer',
+              shopId: null,
+              token: newToken,
+            });
+          });
+        } catch (err) {
+          console.log("FCM Token error:", err);
+        }
 
         Alert.alert('Success', 'Login successful!', [
           { text: 'OK', onPress: () => navigation.navigate('Home') }
@@ -51,7 +94,13 @@ export default function LoginScreen() {
       }
     } catch (error: any) {
       console.log('Login Error:', error.response?.data || error.message || error);
-      Alert.alert('Error', 'Login failed. Please try again.');
+      
+      // Clear password field for security when login fails
+      setPassword('');
+      
+      // Show specific error message or generic one
+      const errorMessage = error.response?.data?.message || 'Login failed. Please check your credentials.';
+      Alert.alert('Login Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -66,7 +115,7 @@ export default function LoginScreen() {
     >
       <View style={styles.elabaContainer}>
         <Text style={styles.appTitle}>eLABA: Laundry Booking Services</Text>
-        <Image source={require('../assets/img/elaba.png')} style={styles.appIcon} />
+        <Image source={require('../../assets/img/elaba.png')} style={styles.appIcon} />
         <Text style={styles.login}>Login</Text>
         <Text style={styles.portal}>Customer Portal</Text>
       </View>

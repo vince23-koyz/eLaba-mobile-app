@@ -1,14 +1,18 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, ActivityIndicator, Text } from 'react-native';
 
-import WelcomeScreen from '../screens/WelcomeScreen';
-import LoginScreen from '../screens/LoginScreen';
-import SignupScreen from '../screens/SignupScreen';
+import WelcomeScreen from '../screens/Auth/WelcomeScreen';
+import LoginScreen from '../screens/Auth/LoginScreen';
+import PasswordRecovery from '../screens/Auth/PasswordRecovery';
+import SignupScreen from '../screens/Auth/SignupScreen';
 import ShopDetails from '../screens/ShopScreens/ShopDetails';
 import BookingScreen from '../screens/ShopScreens/BookingScreen';
 import ConfirmationScreen from '../screens/ShopScreens/ConfirmScreen';
 import BottomTabs from './BottomTabs';
+import MyProfile from '../screens/MyProfile';
 import EditProfile from '../screens/EditProfile';
 import TransactionHistory from '../screens/TransactionHistory';
 import MessagingScreen from '../screens/Messaging/MessagingScreen';
@@ -17,6 +21,7 @@ import ConvoScreen from '../screens/Messaging/ConvoScreen';
 export type RootStackParamList = {
   Welcome: undefined;
   Login: undefined;
+  PasswordRecovery: undefined;
   Signup: undefined;
   Home: undefined;
   Messaging: undefined;
@@ -26,6 +31,7 @@ export type RootStackParamList = {
     receiverId: string;
     receiverType: 'customer' | 'admin';
     avatar: any;
+    useCreativeIcon?: boolean;
   };
   ShopDetails: { shop_id: number };
   BookingService: { 
@@ -51,6 +57,7 @@ export type RootStackParamList = {
     shop_id: number;
     customer_id: number;
   };
+  MyProfile: undefined;
   EditProfile: undefined; 
   Transaction: undefined;
 };
@@ -58,9 +65,46 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 const Navigator = () => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    checkAuthStatus();
+  }, []);
+
+  const checkAuthStatus = async () => {
+    try {
+      const customerId = await AsyncStorage.getItem('customerId');
+      const customerName = await AsyncStorage.getItem('customerName');
+      const isLoggedIn = await AsyncStorage.getItem('isLoggedIn');
+      
+      // Check if user data exists and isLoggedIn flag is true
+      if (customerId && customerName && isLoggedIn === 'true') {
+        setIsLoggedIn(true);
+      } else {
+        setIsLoggedIn(false);
+      }
+    } catch (error) {
+      console.log('Error checking auth status:', error);
+      setIsLoggedIn(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Show loading screen while checking auth status
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#96bcff' }}>
+        <ActivityIndicator size="large" color="#ffffff" />
+        <Text style={{ color: '#ffffff', marginTop: 10, fontSize: 16 }}>Loading...</Text>
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="Welcome">
+      <Stack.Navigator initialRouteName={isLoggedIn ? "Home" : "Welcome"}>
         <Stack.Screen
           name="Welcome"
           component={WelcomeScreen}
@@ -69,6 +113,11 @@ const Navigator = () => {
         <Stack.Screen 
           name="Login" 
           component={LoginScreen} 
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="PasswordRecovery" 
+          component={PasswordRecovery} 
           options={{ headerShown: false }}
         />
         <Stack.Screen 
@@ -104,6 +153,11 @@ const Navigator = () => {
         <Stack.Screen 
           name="Confirmation" 
           component={ConfirmationScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="MyProfile" 
+          component={MyProfile} 
           options={{ headerShown: false }}
         />
         <Stack.Screen 

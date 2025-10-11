@@ -1,8 +1,13 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native'
 import React from 'react'
 import LinearGradient from 'react-native-linear-gradient'
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/Navigator';
 
 export default function TransactionHistory() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
   return (
     <ScrollView
       contentContainerStyle={styles.scrollContent}
@@ -15,7 +20,9 @@ export default function TransactionHistory() {
         style={styles.gradientBackground}
       >
         <View style={styles.header}>
-          <Image source={require('../assets/img/icon/back.png')} style={styles.backIcon} />
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Image source={require('../assets/img/icon/back.png')} style={styles.backIcon} />
+          </TouchableOpacity>
           <Text style={styles.title}>Transaction History</Text>
         </View>
         <View style={styles.form}>

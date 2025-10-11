@@ -28,7 +28,7 @@ export default function BookingScreen({ route }: { route: BookingServiceRoutePro
 
   const [selectedService, setSelectedService] = useState<number | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [payment, setPayment] = useState<'gcash' | 'cash' | 'cod' | null>(null);
+  const [payment, setPayment] = useState<'cash' | 'cod' | null>(null);
   const [loading] = useState(false);
   const [customerId, setCustomerId] = useState<number | null>(null);
 
@@ -251,17 +251,34 @@ useFocusEffect(
             style={{ width: 22, height: 22, resizeMode: 'contain' }} />
           <Text style={[styles.sectionTitle, { marginLeft: 10 }]}>Select Payment</Text>
         </View>
-        {['gcash', 'cash', 'cod'].map((method) => (
-          <TouchableOpacity 
-            key={method} 
-            style={[styles.paymentBtn, payment === method && styles.paymentSelected]}
-            onPress={() => setPayment(method as 'gcash' | 'cash' | 'cod')}
-          >
-            <Text style={[styles.paymentText, payment === method && { color: "#fff" }]}>
-              {method.toUpperCase()}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {['gcash', 'cash', 'cod'].map((method) => {
+          const isDisabled = method === 'gcash';
+          return (
+            <TouchableOpacity 
+              key={method} 
+              style={[
+                styles.paymentBtn, 
+                payment === method && styles.paymentSelected,
+                isDisabled && styles.paymentDisabled
+              ]}
+              onPress={() => {
+                if (!isDisabled) {
+                  setPayment(method as 'cash' | 'cod');
+                }
+              }}
+              disabled={isDisabled}
+            >
+              <Text style={[
+                styles.paymentText, 
+                payment === method && { color: "#fff" },
+                isDisabled && styles.paymentTextDisabled
+              ]}>
+                {method.toUpperCase()}
+                {isDisabled && ' (Not Available)'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       {/* Footer */}
@@ -385,7 +402,9 @@ const styles = StyleSheet.create({
     borderColor: "#ddd"
   },
   paymentSelected: { backgroundColor: "#3eb2ff", borderColor: "#007bff", borderWidth: 2 },
+  paymentDisabled: { backgroundColor: "#e8e8e8", borderColor: "#ccc", opacity: 0.6 },
   paymentText: { fontSize: 16, fontWeight: "600", color: "#333" },
+  paymentTextDisabled: { color: "#999", fontWeight: "400" },
 
   // Footer
   footer: {

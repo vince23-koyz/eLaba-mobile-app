@@ -17,7 +17,7 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../navigation/Navigator';
+import { RootStackParamList } from '../../navigation/Navigator';
 import axios from 'axios';
 
 export default function SignupScreen() {
@@ -108,7 +108,7 @@ export default function SignupScreen() {
             <View style={styles.form}>
               <View style={styles.row}>
                 <View style={styles.halfInputWrapper}>
-                  <Text style={styles.label}>First Name</Text>
+                  <Text style={styles.labelFirst}>First Name</Text>
                   <TextInput
                     style={styles.input}
                     placeholder="First name"
@@ -119,7 +119,7 @@ export default function SignupScreen() {
                 </View>
 
                 <View style={styles.halfInputWrapper}>
-                  <Text style={styles.label}>Last Name</Text>
+                  <Text style={styles.labelFirst}>Last Name</Text>
                   <TextInput
                     style={styles.input}
                     placeholder="Last name"
@@ -129,10 +129,10 @@ export default function SignupScreen() {
                   />
                 </View>
               </View>
-              <Text style={styles.label}>Username</Text>
+              <Text style={styles.labelCompact}>Username</Text>
               <TextInput style={styles.input} placeholder="4-6 characters" value={username} onChangeText={setUsername} placeholderTextColor="#4d4d4dbd" />
 
-              <Text style={styles.label}>Address</Text>
+              <Text style={styles.labelRegular}>Address</Text>
               <View style={styles.row}>
                 <View style={styles.halfInputWrapper}>
                   <TextInput style={styles.input} placeholder="Street" value={street} onChangeText={setStreet} placeholderTextColor="#4d4d4dbd" />
@@ -144,7 +144,7 @@ export default function SignupScreen() {
               <TextInput style={styles.input} placeholder="Barangay" value={barangay} onChangeText={setBarangay} placeholderTextColor="#4d4d4dbd" />
               <TextInput style={styles.input} placeholder="City" value={city} onChangeText={setCity} placeholderTextColor="#4d4d4dbd" />
 
-              <Text style={styles.label}>Phone Number</Text>
+              <Text style={styles.labelRegular}>Phone Number</Text>
               <View style={styles.phoneRow}>
                 <TextInput
                   style={styles.phoneInput}
@@ -158,7 +158,7 @@ export default function SignupScreen() {
                   <Text style={styles.verifyLink}>Verify</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.label}>Password</Text>
+              <Text style={styles.labelCompact}>Password</Text>
               <View style={styles.inputContainer}>
                 <TextInput
                   style={styles.input}
@@ -176,15 +176,15 @@ export default function SignupScreen() {
                   <Image
                     source={
                       passwordVisible
-                        ? require('../assets/img/icon/visibility.png')
-                        : require('../assets/img/icon/visibility-off.png')
+                        ? require('../../assets/img/icon/visibility.png')
+                        : require('../../assets/img/icon/visibility-off.png')
                     }
                     style={styles.eyeIcon}
                   />
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>Confirm Password</Text>
+              <Text style={styles.labelCompact}>Confirm Password</Text>
               <View style={styles.inputContainer}>
                 <TextInput
                   style={styles.input}
@@ -203,7 +203,7 @@ export default function SignupScreen() {
               >
                 <Text style={styles.submitButtonText}>Submit</Text>
               </TouchableOpacity>
-              <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8 }}>
                 <Text style={{ color: '#444', fontSize: 14 }}>Already have an account? </Text>
                 <TouchableOpacity onPress={() => navigation.navigate('Login')}>
                   <Text style={{ color: '#2b7ecb', fontWeight: '600', fontSize: 14 }}>Login</Text>
@@ -257,10 +257,13 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#ffffff90',
     borderRadius: 25,
-    padding: 20,
-    marginTop: 10,
+    padding: 16,
+    marginTop: 8,
   },
   label: { fontSize: 14, marginBottom: 10, marginTop: 16 },
+  labelFirst: { fontSize: 14, marginBottom: 6, marginTop: 0 },
+  labelRegular: { fontSize: 14, marginBottom: 6, marginTop: 8 },
+  labelCompact: { fontSize: 14, marginBottom: 4, marginTop: 4 },
   inputContainer: {
     position: 'relative',
     width: '100%',
@@ -268,14 +271,14 @@ const styles = StyleSheet.create({
   },
   input: {
     width: '100%',
-    height: 42,
+    height: 38,
     backgroundColor: '#fffcf2',
     borderRadius: 12,
     borderWidth: 0.5,
     borderColor: '#89bfb8',
     paddingHorizontal: 14,
     paddingRight: 40, 
-    marginBottom: 10,
+    marginBottom: 6,
   },
   eyeButton: {
     position: 'absolute',
@@ -284,18 +287,18 @@ const styles = StyleSheet.create({
     transform: [{ translateY: -12 }],
   },
   eyeIcon: { width: 22, height: 22, tintColor: '#444' },
-  row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  row: { flexDirection: 'row', gap: 10, marginBottom: 6 },
   halfInputWrapper: { flex: 1 },
-  phoneRow: { flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: 10 },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: 6 },
   phoneInput: {
     flex: 1,
-    height: 45,
+    height: 38,
     backgroundColor: '#fffcf2',
     borderRadius: 12,
     borderWidth: 0.5,
     borderColor: '#89bfb8',
     paddingHorizontal: 14,
-    marginBottom: 10,
+    marginBottom: 6,
   },
   verifyButtonInline: {
     marginLeft: 10,
@@ -307,10 +310,10 @@ const styles = StyleSheet.create({
   verifyLink: { color: '#fff', fontWeight: '600' },
   submitButton: {
     width: '60%',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 12,
     alignSelf: 'center',
   },
   submitButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },

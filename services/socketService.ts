@@ -3,6 +3,8 @@ import { io, Socket } from 'socket.io-client';
 class SocketService {
   private socket: Socket | null = null;
   private static instance: SocketService;
+  private currentUserId: string = '';
+  private currentUserType: 'customer' | 'admin' = 'customer';
 
   private constructor() {}
 
@@ -56,9 +58,19 @@ class SocketService {
 
   disconnect() {
     if (this.socket) {
+      console.log('🔌 [CUSTOMER] Disconnecting socket and cleaning up');
+      
+      // Remove all listeners
+      this.socket.removeAllListeners();
+      
+      // Disconnect socket
       this.socket.disconnect();
       this.socket = null;
+      
+      console.log('✅ [CUSTOMER] Socket disconnected and cleaned up');
     }
+    this.currentUserId = '';
+    this.currentUserType = 'customer';
   }
 
   sendMessage(messageData: {
@@ -95,7 +107,12 @@ class SocketService {
 
   joinConversation(shopId: string, senderId: string, senderType: 'customer' | 'admin', receiverId: string, receiverType: 'customer' | 'admin') {
     if (this.socket?.connected) {
-      const conversationId = `shop_${shopId}_${senderType}_${senderId}_${receiverType}_${receiverId}`;
+      // Create a standardized conversation ID that's the same regardless of who joins
+      // Always put customer ID first, then admin ID to ensure consistency
+      const customerId = senderType === 'customer' ? senderId : receiverId;
+      const adminId = senderType === 'admin' ? senderId : receiverId;
+      const conversationId = `shop_${shopId}_customer_${customerId}_admin_${adminId}`;
+      
       this.socket.emit('joinConversation', conversationId);
       console.log(`🔗 Joined conversation: ${conversationId}`);
     }
@@ -103,7 +120,11 @@ class SocketService {
 
   leaveConversation(shopId: string, senderId: string, senderType: 'customer' | 'admin', receiverId: string, receiverType: 'customer' | 'admin') {
     if (this.socket?.connected) {
-      const conversationId = `shop_${shopId}_${senderType}_${senderId}_${receiverType}_${receiverId}`;
+      // Use the same standardized conversation ID format
+      const customerId = senderType === 'customer' ? senderId : receiverId;
+      const adminId = senderType === 'admin' ? senderId : receiverId;
+      const conversationId = `shop_${shopId}_customer_${customerId}_admin_${adminId}`;
+      
       this.socket.emit('leaveConversation', conversationId);
       console.log(`👋 Left conversation: ${conversationId}`);
     }

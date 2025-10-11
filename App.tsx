@@ -1,7 +1,10 @@
 import React from 'react';
-import Navigator from './navigation/Navigator'; // adjust path if needed
+import Navigator from './navigation/Navigator';
+import { useNotifications } from './hook/useNotifications';
 
 const App: React.FC = () => {
+
+  useNotifications();
   return <Navigator />;
 };
 

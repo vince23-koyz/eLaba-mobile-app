@@ -1,7 +1,7 @@
-import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ScrollView, Alert, Keyboard } from 'react-native'
+import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ScrollView, Alert, Keyboard, BackHandler } from 'react-native'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/Navigator'
 import useMessaging, { Message } from '../../hook/useMessaging';
@@ -15,7 +15,7 @@ const screenHeight = Dimensions.get("window").height;
 export default function ConvoScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>(); 
   const route = useRoute<ConvoScreenRouteProp>();
-  const { shopName, shopId, receiverId, receiverType, avatar } = route.params;
+  const { shopName, shopId, receiverId, receiverType, avatar, useCreativeIcon } = route.params;
   
   const [inputText, setInputText] = useState('');
   const [inputHeight, setInputHeight] = useState(40);
@@ -166,6 +166,31 @@ export default function ConvoScreen() {
     // Convert both to strings for comparison to avoid type issues
     const isMyMessage = message.sender_id.toString() === userId.toString() && message.sender_type === userType;
     
+    // Additional validation: Only show messages that belong to this conversation
+    const isValidMessage = (
+      message.shop_id.toString() === shopId.toString() &&
+      (
+        // Message sent by current user
+        (message.sender_id.toString() === userId.toString()) ||
+        // Message received by current user from the expected sender
+        (message.sender_id.toString() === receiverId.toString() && 
+         (message.receiver_id.toString() === userId.toString()))
+      )
+    );
+
+    if (!isValidMessage) {
+      console.log('🚫 Invalid message for this conversation, skipping:', {
+        messageShopId: message.shop_id,
+        currentShopId: shopId,
+        messageSenderId: message.sender_id,
+        currentUserId: userId,
+        messageReceiverId: message.receiver_id,
+        expectedReceiverId: receiverId,
+        messageText: message.message_text.substring(0, 20)
+      });
+      return null;
+    }
+    
     // Debug logging to see what's happening
     console.log('🔍 Message check:', {
       messageIndex: index,
@@ -210,14 +235,27 @@ export default function ConvoScreen() {
 
   const handleBack = () => {
     // Clear messages and leave conversation before navigating back
-    if (userType === 'customer') {
+    if (userId && receiverId) {
       leaveConversationRef.current(userId, receiverId, shopId);
-    } else {
-      leaveConversationRef.current(receiverId, userId, shopId);
     }
     clearMessagesRef.current();
     navigation.goBack();
   }
+
+  // Handle Android hardware back button
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        console.log('🔙 Android back button pressed');
+        handleBack();
+        return true; // Prevent default back action
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => subscription.remove();
+    }, [userId, receiverId, shopId])
+  );
 
   return (
     <LinearGradient
@@ -248,7 +286,23 @@ export default function ConvoScreen() {
 
         {/* Avatar */}
         <View style={styles.avatarContainer}>
-          <Image source={avatar} style={styles.avatar} />
+          {useCreativeIcon ? (
+            <View style={styles.creativeAvatarContainer}>
+              {/* Laundry Machine Icon */}
+              <View style={styles.washingMachine}>
+                <View style={styles.machineBody} />
+                <View style={styles.machineWindow} />
+                <View style={styles.machineControl1} />
+                <View style={styles.machineControl2} />
+              </View>
+              {/* Floating Bubbles */}
+              <View style={styles.bubble1} />
+              <View style={styles.bubble2} />
+              <View style={styles.bubble3} />
+            </View>
+          ) : (
+            <Image source={avatar} style={styles.avatar} />
+          )}
         </View>
       </View>
 
@@ -268,7 +322,9 @@ export default function ConvoScreen() {
                 <Text style={styles.noMessagesText}>No messages yet. Start the conversation!</Text>
               </View>
             ) : (
-              messages.map((message, index) => renderMessage(message, index))
+              messages
+                .map((message, index) => renderMessage(message, index))
+                .filter(Boolean) // Remove null messages
             )}
           </View>
         )}
@@ -471,5 +527,89 @@ const styles = StyleSheet.create({
   noMessagesText: {
     color: '#666',
     fontSize: 16,
+  },
+  // Creative Avatar Styles
+  creativeAvatarContainer: {
+    width: 40,
+    height: 40,
+    backgroundColor: '#4A90E2',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  washingMachine: {
+    width: 20,
+    height: 20,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  machineBody: {
+    width: 20,
+    height: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 4,
+    position: 'absolute',
+    shadowColor: 'rgba(0, 0, 0, 0.2)',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  machineWindow: {
+    width: 12,
+    height: 12,
+    backgroundColor: 'rgba(74, 144, 226, 0.3)',
+    borderRadius: 6,
+    position: 'absolute',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  machineControl1: {
+    width: 2,
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 1,
+    position: 'absolute',
+    top: -6,
+    left: -4,
+  },
+  machineControl2: {
+    width: 2,
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 1,
+    position: 'absolute',
+    top: -6,
+    right: -4,
+  },
+  bubble1: {
+    width: 4,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    borderRadius: 2,
+    position: 'absolute',
+    top: 8,
+    left: 8,
+  },
+  bubble2: {
+    width: 3,
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    borderRadius: 1.5,
+    position: 'absolute',
+    top: 4,
+    right: 6,
+  },
+  bubble3: {
+    width: 2,
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 1,
+    position: 'absolute',
+    top: 10,
+    right: 12,
   },
 })

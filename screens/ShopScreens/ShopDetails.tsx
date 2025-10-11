@@ -44,12 +44,18 @@ export default function ShopDetailsScreen() {
       return;
     }
     
+    // Use shop logo as avatar if available, otherwise use creative icon flag
+    const avatarSource = shop.logo 
+      ? { uri: `http://10.0.2.2:5000${shop.logo}` }
+      : null; // Pass null to trigger creative icon in ConvoScreen
+    
     navigation.navigate('Convo', {
       shopName: shop.name,
       shopId: shop_id.toString(),
       receiverId: shop.admin_id.toString(),
       receiverType: 'admin' as const,
-      avatar: require('../../assets/img/bhive.png') // You can update this to use shop's actual image
+      avatar: avatarSource,
+      useCreativeIcon: !shop.logo // Flag to use creative icon when no logo
     });
   };
 
@@ -105,10 +111,16 @@ export default function ShopDetailsScreen() {
 
               {/* Shop Info Full Width */}
               <View style={styles.shopInfoCard}>
-                <Image 
-                  source={require('../../assets/img/bhive.png')} 
-                  style={styles.shopImg} 
-                />
+                {shop.logo ? (
+                  <Image 
+                    source={{ uri: `http://10.0.2.2:5000${shop.logo}` }} 
+                    style={styles.shopImg} 
+                  />
+                ) : (
+                  <View style={styles.shopImgPlaceholder}>
+                    <Text style={styles.shopImgPlaceholderText}>🏪</Text>
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.shopName}>{shop.name}</Text>
                   <View style={styles.operationHoursContainer}>
@@ -134,7 +146,7 @@ export default function ShopDetailsScreen() {
               onPress={() => setActiveTab('services')}
             >
               <Text style={[styles.tabText, activeTab === 'services' && styles.activeTabText]}>
-                Services
+                Services Offered
               </Text>
             </TouchableOpacity>
 
@@ -211,16 +223,19 @@ export default function ShopDetailsScreen() {
                   {item.description}
                 </Text>
                 
-                <TouchableOpacity 
-                  style={styles.expandButton}
-                  onPress={() =>
-                    setExpandedService(expandedService === item.service_id ? null : item.service_id)
-                  }
-                >
-                  <Text style={styles.expandText}>
-                    {expandedService === item.service_id ? "Show Less" : "Read More"}
-                  </Text>
-                </TouchableOpacity>
+                {/* Only show Read More button if description is long enough */}
+                {item.description && item.description.length > 100 && (
+                  <TouchableOpacity 
+                    style={styles.expandButton}
+                    onPress={() =>
+                      setExpandedService(expandedService === item.service_id ? null : item.service_id)
+                    }
+                  >
+                    <Text style={styles.expandText}>
+                      {expandedService === item.service_id ? "Show Less" : "Read More"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </TouchableOpacity>
           ) : null
@@ -306,13 +321,13 @@ const styles = StyleSheet.create({
   // HEADER
   headerGradient: {
     paddingBottom: 0,
-    paddingTop: 40,
+    paddingTop: 30,
   },
   headerIcons: {
-    height: 60,
+    height: 45,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 10,
   },
   leftIcon: {
     position: 'absolute',
@@ -360,6 +375,22 @@ const styles = StyleSheet.create({
     resizeMode: 'cover',
     borderWidth: 2,
     borderColor: '#f0f0f0',
+  },
+  shopImgPlaceholder: {
+    width: 100, 
+    height: 100, 
+    marginRight: 18, 
+    borderRadius: 16,
+    backgroundColor: '#667eea',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+  },
+  shopImgPlaceholderText: {
+    fontSize: 32,
+    color: '#ffffff',
+    opacity: 0.9,
   }, 
   shopName: { 
     fontSize: 22, 
@@ -394,18 +425,18 @@ const styles = StyleSheet.create({
   }, 
   favoriteBtn: {
     position: 'absolute',
-    top: 16,
-    right: 16,
-    padding: 8,
+    top: 12,
+    right: 12,
+    padding: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 20,
+    borderRadius: 15,
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 3,
     elevation: 2,
   },
-  favoriteIcon: { width: 20, height: 20, resizeMode: 'contain' },
+  favoriteIcon: { width: 16, height: 16, resizeMode: 'contain' },
   
   // TAB ROW
   tabRow: {
@@ -443,73 +474,75 @@ const styles = StyleSheet.create({
   
   // SERVICES
   serviceCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
     marginHorizontal: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
-    elevation: 4,
+    marginBottom: 8,
+    shadowColor: '#78e4d7',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 2,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#f0f8ff',
   },
   serviceContent: {
-    padding: 20,
+    padding: 12,
   },
   serviceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 6,
   },
   serviceName: { 
-    fontSize: 18, 
+    fontSize: 15, 
     fontWeight: '700', 
-    color: '#1a1a1a',
+    color: '#2c3e50',
     flex: 1,
-    marginRight: 12,
+    marginRight: 10,
     letterSpacing: 0.2,
   },
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    backgroundColor: '#f8f9fa',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#32a4c3',
+    backgroundColor: '#78e4d7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#6bd0d7',
   },
   priceCurrency: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#32a4c3',
-    marginRight: 2,
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginRight: 1,
   },
   servicePrice: { 
-    fontSize: 18, 
+    fontSize: 14, 
     fontWeight: '700', 
-    color: '#32a4c3',
+    color: '#ffffff',
   },
   serviceDesc: { 
-    fontSize: 15, 
-    color: '#666', 
-    lineHeight: 22,
-    marginBottom: 12,
+    fontSize: 13, 
+    color: '#5a6c7d', 
+    lineHeight: 18,
+    marginBottom: 8,
   },
   expandButton: {
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#f0f8ff',
-    borderRadius: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    backgroundColor: '#e8f4fd',
+    borderRadius: 5,
     borderWidth: 1,
-    borderColor: '#e3f2fd',
+    borderColor: '#78e4d7',
   },
   expandText: { 
-    fontSize: 13, 
-    color: '#2196F3', 
+    fontSize: 11, 
+    color: '#2d79d1', 
     fontWeight: '600',
     letterSpacing: 0.3,
   },

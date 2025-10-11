@@ -75,7 +75,30 @@ export default function ConfirmationScreen({ route }: { route: ConfirmationRoute
         status: "Pending",
       });
 
-      Alert.alert("Success", "Booking confirmed!");
+      // Notify shop staff
+      try {
+        console.log("📤 Sending notification to shop:", {
+          shopId: shop_id,
+          bookingId: booking_id,
+          title: "New Service Booking",
+          message: `A new service booking has just been received from ${customerName} ${customerLastName}! Please check the details and confirm the order to begin processing.`,
+        });
+        
+        const notificationResponse = await axios.post("http://10.0.2.2:5000/api/notifications/send-notification", {
+          shopId: shop_id,
+          bookingId: booking_id,
+          title: "New Service Booking",
+          message: `A new service booking has just been received from ${customerName} ${customerLastName}! Please check the details and confirm the order to begin processing.`,
+        });
+        
+        console.log("✅ Shop notification sent successfully:", notificationResponse.data);
+      } catch (notifError: any) {
+        console.warn("⚠️ Failed to notify shop:", notifError.response?.data || notifError.message);
+        console.warn("⚠️ Full error:", notifError);
+        // Don't fail the entire booking process if notification fails
+      }
+
+      Alert.alert("Success", "Your booking has been sent!");
       navigation.navigate("Home");
     } catch (err: any) {
       console.error("Booking error:", err.response?.data || err);
@@ -84,7 +107,7 @@ export default function ConfirmationScreen({ route }: { route: ConfirmationRoute
       setLoading(false);
     }
   };
-
+  
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}

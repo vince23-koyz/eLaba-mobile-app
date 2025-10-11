@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import ShopCard from '../components/ShopCard';
 import useShops from '../hook/useShops';
+import useUnreadMessages from '../hook/useUnreadMessages';
 
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -36,16 +37,24 @@ export default function HomeScreen() {
   const { shops, loading, error, refresh } = useShops();
 
   const [customerName, setCustomerName] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
+
+  // Use unread messages hook
+  const { unreadCount, clearUnreadMessages } = useUnreadMessages(customerId || '', 'customer');
 
   useEffect(() => {
     const loadCustomerName = async () => {
       try {
         const name = await AsyncStorage.getItem('customerName');
+        const id = await AsyncStorage.getItem('customerId');
         if (name) {
           setCustomerName(name);
         }
+        if (id) {
+          setCustomerId(id);
+        }
       } catch (e) {
-        console.log("Error loading customer name:", e);
+        console.log("Error loading customer data:", e);
       }
     };
 
@@ -53,6 +62,8 @@ export default function HomeScreen() {
   }, []);
 
   const handleMessages = () => {
+    // Clear unread messages when entering messaging screen
+    clearUnreadMessages();
     navigation.navigate('Messaging');
   };
 
@@ -128,6 +139,13 @@ useEffect(() => {
               </View>
               <TouchableOpacity onPress={handleMessages} style={styles.messageContainer}>
                 <Image source={require('../assets/img/icon/message.png')} style={styles.messageIcon} />
+                {unreadCount > 0 && (
+                  <View style={styles.unreadIndicator}>
+                    <Text style={styles.unreadCount}>
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </Text>
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
 
@@ -177,6 +195,7 @@ useEffect(() => {
               key={shop.shop_id} 
               name={shop.name}
               address={shop.address}
+              logo={shop.logo} // Pass logo from shop data
               onPress={() => navigation.navigate('ShopDetails', { shop_id: shop.shop_id })}
             />
           ))}
@@ -229,15 +248,35 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   messageContainer: {
-    backgroundColor: '#4ef3ff5f',
+    backgroundColor: '#dcfdffe9',
     width: 45,
     height: 45,
     borderRadius: 50,
     padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   messageIcon: { width: 35, height: 35 },
+  unreadIndicator: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#ff4444',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  unreadCount: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
   rectangleLine: {
     backgroundColor: '#a5c4fa',
     width: '100%',

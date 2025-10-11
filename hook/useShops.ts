@@ -10,6 +10,7 @@ interface Shop {
   owner_name?: string;
   operation_hours?: string;
   admin_id?: number;
+  logo?: string;
 }
 
 export default function useShops() {
