@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { api } from '../config/api';
 
 interface Service {
   service_id: number;
@@ -21,7 +21,7 @@ export default function useShopServices(shop_id: number) {
     if (!shop_id) return;
     try {
       setLoading(true);
-      const response = await axios.get(`http://10.0.2.2:5000/api/service/shop/${shop_id}`);
+      const response = await api.get(`/service/shop/${shop_id}`);
       setServices(response.data);
       setError(null);
     } catch (err: any) {

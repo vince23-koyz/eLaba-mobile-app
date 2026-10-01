@@ -1,19 +1,54 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Image } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Image, Animated } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { API_CONFIG } from '../config/api';
 
 interface ShopCardProps {
   name: string;
   address?: string; 
-  logo?: string; // Add logo prop for shop banners
+  logo?: string; // Shop banner/logo
+  status?: 'active' | 'inactive' | 'pending' | string; // backend status; pending will be filtered out upstream
   onPress: () => void;
 }
 
 const { width } = Dimensions.get('window');
 
-export default function ShopCard({ name, address, logo, onPress }: ShopCardProps) {
-  // Construct full logo URL if logo path exists
-  const logoUrl = logo ? `http://10.0.2.2:5000${logo}` : null;
+export default function ShopCard({ name, address, logo, status, onPress }: ShopCardProps) {
+  // Construct logo URL: if already absolute, use as-is; else prefix backend base
+  const logoUrl = logo
+    ? (logo.startsWith('http') ? logo : `${API_CONFIG.BASE_ORIGIN}${logo}`)
+    : null;
+
+  // Status indicator mapping
+  const isActive = status === 'active' || !status; // default to active if not provided
+  const indicatorBg = isActive ? 'rgba(76, 175, 80, 0.9)' : 'rgba(239, 68, 68, 0.9)';
+  const indicatorText = isActive ? 'Open' : 'Closed';
+  const glowAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!isActive) {
+      glowAnim.setValue(0);
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [isActive, glowAnim]);
 
   return (
     <TouchableOpacity 
@@ -77,10 +112,27 @@ export default function ShopCard({ name, address, logo, onPress }: ShopCardProps
         </TouchableOpacity>
         
         {/* Status indicator */}
-        <View style={styles.statusIndicator}>
+        <Animated.View
+          style={[
+            styles.statusIndicator,
+            {
+              backgroundColor: indicatorBg,
+              borderColor: glowAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['rgba(255,255,255,0.35)', 'rgba(255,255,255,0.95)'],
+              }),
+              shadowColor: isActive ? '#ffffff' : '#000000',
+              shadowOpacity: isActive ? glowAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.2, 0.7],
+              }) : 0.2,
+              shadowRadius: isActive ? 6 : 4,
+            },
+          ]}
+        >
           <View style={styles.statusDot} />
-          <Text style={styles.statusText}>Open</Text>
-        </View>
+          <Text style={styles.statusText}>{indicatorText}</Text>
+        </Animated.View>
       </View>
 
       {/* Content Section */}
@@ -344,6 +396,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
     zIndex: 3,
+    borderWidth: 1.2,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
   statusDot: {
     width: 6,
@@ -355,7 +409,7 @@ const styles = StyleSheet.create({
   statusText: {
     color: '#ffffff',
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     letterSpacing: 0.3,
   },
   

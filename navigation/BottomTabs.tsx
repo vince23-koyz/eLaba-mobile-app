@@ -1,15 +1,44 @@
 //BottomTabs.tsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Image, Text, StyleSheet } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import HomeScreen from '../screens/HomeScreen';
 import NotificationScreen from '../screens/NotificationScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import MessagingScreen from '../screens/Messaging/MessagingScreen';
+import useNotificationCount from '../hook/useNotificationCount';
+import useUnreadMessages from '../hook/useUnreadMessages';
 
 const Tab = createBottomTabNavigator();
 
 export default function BottomTabs() {
+  const { count } = useNotificationCount();
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const { unreadCount, refreshUnreadMessages } = useUnreadMessages(customerId || '', 'customer');
+
+  useEffect(() => {
+    const loadCustomerId = async () => {
+      try {
+        const id = await AsyncStorage.getItem('customerId');
+        setCustomerId(id || null);
+      } catch (error) {
+        console.log('Error loading customer id for tabs:', error);
+      }
+    };
+
+    void loadCustomerId();
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!customerId) return;
+      void refreshUnreadMessages();
+    }, [customerId, refreshUnreadMessages])
+  );
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -25,7 +54,10 @@ export default function BottomTabs() {
             label = 'Home';
           } else if (route.name === 'Notification') {
             iconPath = require('../assets/img/icon/bell-icon.png');
-            label = 'Notification';
+            label = 'Notifs';
+          } else if (route.name === 'Messaging') {
+            iconPath = require('../assets/img/icon/chat.png');
+            label = 'Chats';
           } else if (route.name === 'Profile') {
             iconPath = require('../assets/img/icon/account-icon.png');
             label = 'Profile';
@@ -51,9 +83,9 @@ export default function BottomTabs() {
                 {label}
               </Text>
 
-              {route.name === 'Notification' && (
+              {(route.name === 'Notification' && count > 0 || route.name === 'Messaging' && unreadCount > 0) && (
                 <View style={styles.badgeBubble}>
-                  <Text style={styles.badgeText}>3</Text>
+                  <Text style={styles.badgeText}>{route.name === 'Notification' ? (count > 99 ? '99+' : count) : (unreadCount > 99 ? '99+' : unreadCount)}</Text>
                 </View>
               )}
             </View>
@@ -62,6 +94,7 @@ export default function BottomTabs() {
       })}
     >
       <Tab.Screen name="HomeTab" component={HomeScreen} />
+      <Tab.Screen name="Messaging" component={MessagingScreen} />
       <Tab.Screen name="Notification" component={NotificationScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
@@ -76,7 +109,6 @@ const styles = StyleSheet.create({
     right: 20,
     height: 80,
     backgroundColor: '#ffffffea',
-    borderRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.1,

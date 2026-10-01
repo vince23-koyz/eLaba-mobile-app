@@ -1,6 +1,7 @@
 //HomeScreen.tsx
 import React, { useRef, useEffect, useState } from 'react';
 import {
+  Animated,
   StyleSheet,
   Text,
   View,
@@ -11,7 +12,8 @@ import {
   Platform,
   RefreshControl,
   BackHandler,
-  ToastAndroid
+  ToastAndroid,
+  Dimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
@@ -19,10 +21,23 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/Navigator';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+
 import ShopCard from '../components/ShopCard';
 import useShops from '../hook/useShops';
-import useUnreadMessages from '../hook/useUnreadMessages';
+import { api, API_ENDPOINTS, API_CONFIG } from '../config/api';
 
+// Fisher-Yates shuffle
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = array.slice();
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+
+const { width } = Dimensions.get('window');
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -33,38 +48,91 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [firstLoad, setFirstLoad] = useState(true);
   const lastBackPress = useRef(0);
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const shimmerTranslate = shimmerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-220, 220],
+  });
 
   const { shops, loading, error, refresh } = useShops();
+  // Randomize shops order for display
+  const [randomizedShops, setRandomizedShops] = useState<typeof shops>([]);
 
   const [customerName, setCustomerName] = useState<string | null>(null);
+  const [customerLastName, setCustomerLastName] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
-
-  // Use unread messages hook
-  const { unreadCount, clearUnreadMessages } = useUnreadMessages(customerId || '', 'customer');
+  const [profilePicture, setProfilePicture] = useState<string | null>(null);
+  const [imageKey, setImageKey] = useState(Date.now());
 
   useEffect(() => {
     const loadCustomerName = async () => {
       try {
         const name = await AsyncStorage.getItem('customerName');
+        const lastName = await AsyncStorage.getItem('customerLastName');
         const id = await AsyncStorage.getItem('customerId');
         if (name) {
           setCustomerName(name);
         }
+        if (lastName) {
+          setCustomerLastName(lastName);
+        }
         if (id) {
           setCustomerId(id);
         }
+
+        if (id) {
+          try {
+            const response = await api.get(API_ENDPOINTS.CUSTOMERS.BY_ID(id));
+            const picture = response.data?.profile_picture;
+            if (picture) {
+              setProfilePicture(picture);
+              setImageKey(Date.now());
+            }
+          } catch (error) {
+            console.log('Error loading customer profile image for home header:', error);
+          }
+        }
       } catch (e) {
-        console.log("Error loading customer data:", e);
+        console.log('Error loading customer data:', e);
       }
     };
 
     loadCustomerName();
   }, []);
 
-  const handleMessages = () => {
-    // Clear unread messages when entering messaging screen
-    clearUnreadMessages();
-    navigation.navigate('Messaging');
+  const getInitials = (firstName: string | null, lastName: string | null): string => {
+    if (!firstName && !lastName) return 'NN';
+
+    const firstInitial = firstName ? firstName.charAt(0).toUpperCase() : '';
+    const lastInitial = lastName ? lastName.charAt(0).toUpperCase() : '';
+
+    if (firstInitial && lastInitial) {
+      return firstInitial + lastInitial;
+    }
+    if (firstInitial) return firstInitial;
+    if (lastInitial) return lastInitial;
+    return 'NN';
+  };
+
+  const getProfileImageUrl = (): string | null => {
+    if (!profilePicture) return null;
+    try {
+      const base = API_CONFIG.BASE_ORIGIN;
+      const pic = String(profilePicture);
+      if (pic.startsWith('http')) {
+        return `${pic}${pic.includes('?') ? `&v=${imageKey}` : `?v=${imageKey}`}`;
+      }
+      if (pic.startsWith('/uploads')) {
+        return `${base}${pic}?v=${imageKey}`;
+      }
+      return `${base}/uploads/profile/${pic}?v=${imageKey}`;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleProfile = () => {
+    navigation.navigate('MyProfile');
   };
 
   const onRefresh = async () => {
@@ -72,22 +140,41 @@ export default function HomeScreen() {
     await refresh();
     setRefreshing(false);
   };
-  useEffect(() => {
-    if (isFocused) {
-      scrollRef.current?.scrollTo({ y: 0, animated: true });
-      onRefresh();
-    }
-  }, [isFocused]);
 
   useEffect(() => {
     if (isFocused) {
       scrollRef.current?.scrollTo({ y: 0, animated: true });
-      if (firstLoad) {
-        onRefresh();
-        setFirstLoad(false);
-      }
+      const syncHomeState = async () => {
+        await onRefresh();
+
+        if (firstLoad) {
+          setFirstLoad(false);
+        }
+      };
+
+      void syncHomeState();
     }
   }, [isFocused, firstLoad]);
+
+  // Shuffle shops whenever shops data changes
+  useEffect(() => {
+    if (shops && shops.length > 0) {
+      setRandomizedShops(shuffleArray(shops));
+    } else {
+      setRandomizedShops([]);
+    }
+  }, [shops]);
+
+  useEffect(() => {
+    shimmerAnim.setValue(0);
+    Animated.loop(
+      Animated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 1400,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [shimmerAnim]);
 
 useEffect(() => {
   if (!isFocused) return; 
@@ -137,13 +224,18 @@ useEffect(() => {
                 <Image source={require('../assets/img/elaba.png')} style={styles.appIcon} />
                 <Text style={styles.headerTitle}>eLaba</Text>
               </View>
-              <TouchableOpacity onPress={handleMessages} style={styles.messageContainer}>
-                <Image source={require('../assets/img/icon/message.png')} style={styles.messageIcon} />
-                {unreadCount > 0 && (
-                  <View style={styles.unreadIndicator}>
-                    <Text style={styles.unreadCount}>
-                      {unreadCount > 99 ? '99+' : unreadCount}
-                    </Text>
+              <TouchableOpacity onPress={handleProfile} style={styles.profileAvatarButton}>
+                {profilePicture ? (
+                  <Image
+                    key={`home-header-avatar-${profilePicture}-${imageKey}`}
+                    source={{ uri: getProfileImageUrl() || undefined, cache: 'reload' as any }}
+                    style={styles.profileAvatarImage}
+                    resizeMode="cover"
+                    onError={() => setProfilePicture(null)}
+                  />
+                ) : (
+                  <View style={styles.profileAvatarFallback}>
+                    <Text style={styles.profileAvatarText}>{getInitials(customerName, customerLastName)}</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -164,15 +256,13 @@ useEffect(() => {
             <View style={styles.cardContainer}>
               {[
                 { icon: require('../assets/img/dry.png'), label: 'Dry Clean' },
-                { icon: require('../assets/img/wash.png'), label: 'Laundry' },
+                { icon: require('../assets/img/wash.png'), label: 'Wash' },
                 { icon: require('../assets/img/iron.png'), label: 'Iron' },
               ].map((item, index) => (
-                <TouchableOpacity key={index} activeOpacity={0.8}>
-                  <View style={[styles.card, styles.cardElevated]}>
-                    <Image source={item.icon} style={styles.cardImage} />
-                    <Text style={styles.cardText}>{item.label}</Text>
-                  </View>
-                </TouchableOpacity>
+                <View key={index} style={[styles.card, styles.cardStatic]} pointerEvents="none">
+                  <Image source={item.icon} style={styles.cardImage} />
+                  <Text style={styles.cardText}>{item.label}</Text>
+                </View>
               ))}
             </View>
 
@@ -184,21 +274,59 @@ useEffect(() => {
           </View>
 
           {/* SHOP CARDS */}
-          {loading && <Text style={{ textAlign: 'center', marginTop: 10 }}>Loading shops...</Text>}
           {error && <Text style={{ color: 'red', textAlign: 'center', marginTop: 10 }}>{error}</Text>}
-          {!loading && shops.length === 0 && (
-            <Text style={{ textAlign: 'center', marginTop: 10 }}>No shops available.</Text>
-          )}
 
-          {shops.map((shop) => (
-            <ShopCard
-              key={shop.shop_id} 
-              name={shop.name}
-              address={shop.address}
-              logo={shop.logo} // Pass logo from shop data
-              onPress={() => navigation.navigate('ShopDetails', { shop_id: shop.shop_id })}
-            />
-          ))}
+          {loading ? (
+            Array.from({ length: 3 }).map((_, index) => (
+              <View key={`shop-skeleton-${index}`} style={styles.shopSkeletonCard}>
+                <View style={styles.shopSkeletonBanner}>
+                  <Animated.View
+                    style={[
+                      styles.skeletonShimmer,
+                      {
+                        transform: [{ translateX: shimmerTranslate }],
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.shopSkeletonContent}>
+                  <View style={styles.shopSkeletonLineWide}>
+                    <Animated.View
+                      style={[
+                        styles.skeletonShimmer,
+                        {
+                          transform: [{ translateX: shimmerTranslate }],
+                        },
+                      ]}
+                    />
+                  </View>
+                  <View style={styles.shopSkeletonLineShort}>
+                    <Animated.View
+                      style={[
+                        styles.skeletonShimmer,
+                        {
+                          transform: [{ translateX: shimmerTranslate }],
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+              </View>
+            ))
+          ) : shops.length === 0 ? (
+            <Text style={{ textAlign: 'center', marginTop: 10 }}>No shops available.</Text>
+          ) : (
+            randomizedShops.map((shop) => (
+              <ShopCard
+                key={shop.shop_id}
+                name={shop.name}
+                address={shop.address}
+                logo={shop.logo}
+                status={shop.status as any}
+                onPress={() => navigation.navigate('ShopDetails', { shop_id: shop.shop_id })}
+              />
+            ))
+          )}
 
           {/* FADE EFFECT */}
           <LinearGradient
@@ -247,35 +375,39 @@ const styles = StyleSheet.create({
     fontFamily: 'Caprasimo-Regular',
     color: '#FFFFFF',
   },
-  messageContainer: {
-    backgroundColor: '#dcfdffe9',
-    width: 45,
-    height: 45,
-    borderRadius: 50,
-    padding: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  messageIcon: { width: 35, height: 35 },
-  unreadIndicator: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
-    backgroundColor: '#ff4444',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+  profileAvatarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    overflow: 'hidden',
     borderWidth: 2,
     borderColor: '#ffffff',
+    backgroundColor: '#d9f7ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  unreadCount: {
+  profileAvatarImage: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+  },
+  profileAvatarFallback: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#8bd8ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileAvatarText: {
     color: '#ffffff',
-    fontSize: 12,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontSize: 15,
+    fontWeight: '700',
   },
   rectangleLine: {
     backgroundColor: '#a5c4fa',
@@ -320,9 +452,57 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
+  cardStatic: {
+    backgroundColor: '#ffffff',
+    // Removed elevation/shadow to signal non-interactivity
+  },
   cardImage: { width: 50, height: 50, marginBottom: 6, resizeMode: 'contain' },
   cardText: { fontSize: 13, fontWeight: '600', color: '#2c3e50' },
   selectContainer: { alignItems: 'center', marginTop: 30 },
   selectText: { color: '#221f1f', fontSize: 18, fontWeight: '600' },
+  shopSkeletonCard: {
+    width: width * 0.90,
+    alignSelf: 'center',
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    marginVertical: 10,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  shopSkeletonBanner: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#e8e8ef',
+  },
+  shopSkeletonContent: {
+    padding: 16,
+  },
+  shopSkeletonLineWide: {
+    height: 14,
+    width: '70%',
+    backgroundColor: '#e8e8ef',
+    borderRadius: 8,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  shopSkeletonLineShort: {
+    height: 12,
+    width: '40%',
+    backgroundColor: '#f0f0f5',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  skeletonShimmer: {
+    position: 'absolute',
+    left: -220,
+    top: 0,
+    bottom: 0,
+    width: 220,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
   fadeBottom: { height: 40, marginTop: -40, width: '100%' },
 });

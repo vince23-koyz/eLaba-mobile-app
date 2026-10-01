@@ -1,6 +1,6 @@
 // hooks/useShops.ts
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+import { api } from '../config/api';
 
 interface Shop {
   shop_id: number;
@@ -11,6 +11,8 @@ interface Shop {
   operation_hours?: string;
   admin_id?: number;
   logo?: string;
+  status?: string; // active shops are visible to customers
+  pickup_delivery_enabled?: number | boolean | string;
 }
 
 export default function useShops() {
@@ -21,8 +23,12 @@ export default function useShops() {
   const fetchShops = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://10.0.2.2:5000/api/shop');
-      setShops(response.data);
+      const response = await api.get('/shop');
+      // Customers may browse only approved/active shops.
+      const filtered = Array.isArray(response.data)
+        ? response.data.filter((s: Shop) => String(s.status || '').toLowerCase() === 'active')
+        : [];
+      setShops(filtered);
       setError(null);
     } catch (err: any) {
       console.log('Error fetching shops:', err.message);

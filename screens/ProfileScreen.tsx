@@ -1,17 +1,20 @@
-import { Alert, Image, StyleSheet, Text, TouchableOpacity, View, StatusBar, Dimensions, Modal } from 'react-native'
-import React, { useEffect, useState, useCallback } from 'react'
+import { Image, StyleSheet, Text, TouchableOpacity, View, StatusBar, Dimensions, Modal } from 'react-native'
+import React, { useState, useCallback } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
+import messaging from '@react-native-firebase/messaging';
+import { api, API_ENDPOINTS, API_CONFIG } from '../config/api';
+import { deleteDeviceToken } from '../services/notificationService';
 import socketService from '../services/socketService';
 
 import { RootStackParamList } from '../navigation/Navigator';
 
-const { height } = Dimensions.get('window');
+const { height, width } = Dimensions.get('window');
 
 export default function ProfileScreen() {
+  const isCompactDevice = width < 390;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -58,14 +61,51 @@ export default function ProfileScreen() {
       console.log('🔌 Disconnecting from socket service');
       socketService.disconnect();
       
-      // Clear all AsyncStorage data
+      // Best-effort: revoke/clear device push token server-side and locally
+      try {
+        const [customerId, fcmToken] = await Promise.all([
+          AsyncStorage.getItem('customerId'),
+          AsyncStorage.getItem('fcmToken'),
+        ]);
+
+        if (customerId && fcmToken) {
+          console.log('🔔 Deleting device token on server');
+          try {
+            await deleteDeviceToken(fcmToken);
+          } catch (e) {
+            const msg = (e as any)?.response?.data || (e as any)?.message || String(e);
+            console.warn('⚠️ Failed to delete device token on server (continuing logout):', msg);
+          }
+
+          try {
+            console.log('🗑️ Deleting FCM token locally');
+            await messaging().deleteToken();
+          } catch (e) {
+            const msg = (e as any)?.message || String(e);
+            console.warn('⚠️ Failed to delete local FCM token (continuing):', msg);
+          }
+        }
+      } catch (e) {
+        const msg = (e as any)?.message || String(e);
+        console.warn('⚠️ Error while preparing token cleanup:', msg);
+      }
+
+      // Clear AsyncStorage data (auth/profile/session + fcm)
       console.log('🧹 Clearing AsyncStorage data');
       await AsyncStorage.multiRemove([
         'customerId',
-        'customerName', 
+        'customerName',
+        'customerLastName',
         'customerUsername',
         'customerEmail',
-        'isLoggedIn'
+        'customerPhone',
+        'customerAddress',
+        'customerStreet',
+        'customerZone',
+        'customerBarangay',
+        'customerCity',
+        'fcmToken',
+        'isLoggedIn',
       ]);
       
       console.log('✅ [CUSTOMER] Logout cleanup complete');
@@ -98,30 +138,48 @@ export default function ProfileScreen() {
     navigation.navigate('Transaction')
   };
 
+  // Handler for MyBookingScreen navigation
+  const handleMyOrder = () => {
+    navigation.navigate('MyBookingScreen');
+  };
+
+  // Resolve profile image URL whether absolute (Cloudinary) or relative (/uploads/.. or filename only)
+  const getProfileImageUrl = (): string | null => {
+    if (!profilePicture) return null;
+    try {
+      const base = API_CONFIG.BASE_ORIGIN;
+      const pic = String(profilePicture);
+      if (pic.startsWith('http')) {
+        return `${pic}${pic.includes('?') ? `&v=${imageKey}` : `?v=${imageKey}`}`;
+      }
+      if (pic.startsWith('/uploads')) {
+        return `${base}${pic}?v=${imageKey}`;
+      }
+      // Fallback: old data stored filename only
+      return `${base}/uploads/profile/${pic}?v=${imageKey}`;
+    } catch {
+      return null;
+    }
+  };
+
   // Function to load fresh customer data from database
   const loadCustomerData = useCallback(async () => {
     try {
       const customerId = await AsyncStorage.getItem('customerId');
-      
       if (!customerId) {
         console.log('No customer ID found');
         return;
       }
-
       // Fetch fresh data from database
-      const response = await axios.get(`http://10.0.2.2:5000/api/customers/${customerId}`);
-      
+      const response = await api.get(API_ENDPOINTS.CUSTOMERS.BY_ID(customerId));
       if (response.data) {
         setCustomerName(response.data.first_name);
         setCustomerLastName(response.data.last_name);
         setCustomerUsername(response.data.username);
         setProfilePicture(response.data.profile_picture);
-        // Update imageKey to force image reload if profile picture exists
         if (response.data.profile_picture) {
           setImageKey(Date.now());
         }
-
-        // Also update AsyncStorage with the latest data for consistency
         await AsyncStorage.multiSet([
           ['customerName', response.data.first_name || ''],
           ['customerLastName', response.data.last_name || ''],
@@ -130,13 +188,10 @@ export default function ProfileScreen() {
       }
     } catch (error) {
       console.error("Error loading customer data:", error);
-      
-      // Fallback to AsyncStorage if API fails
       try {
         const firstName = await AsyncStorage.getItem('customerName');
         const lastName = await AsyncStorage.getItem('customerLastName');
         const username = await AsyncStorage.getItem('customerUsername');
-        
         if (firstName) setCustomerName(firstName);
         if (lastName) setCustomerLastName(lastName);
         if (username) setCustomerUsername(username);
@@ -157,86 +212,95 @@ export default function ProfileScreen() {
     <>
       <StatusBar barStyle="light-content" backgroundColor="#96bcff" />
       <LinearGradient
-        colors={['#6896e6', '#80dad0']}
+        colors={['#a2fff4', '#96bcff']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.container}
       >
-        {/* Header with Avatar */}
-        <View style={styles.headerContainer}>
-          <View style={styles.profileImageContainer}>
-            <View style={styles.profileAvatar}>
+        <Text style={styles.sectionTitle}>My Profile</Text>
+
+        {/* Profile Card */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={handleProfile}
+          style={[styles.profileCard, { width: width * 0.76, alignSelf: 'center', marginTop: 12 }]}
+        >
+          <View style={styles.profileIdentity}>
+            <View style={[styles.profileAvatarLarge, { width: isCompactDevice ? 64 : 72, height: isCompactDevice ? 64 : 72, borderRadius: (isCompactDevice ? 64 : 72) / 2 }]}>
               {profilePicture ? (
-                <Image 
-                  key={`profile-${profilePicture}-${imageKey}`}
-                  source={{
-                    uri: `http://10.0.2.2:5000/uploads/customer-profile/${profilePicture}?v=${imageKey}`,
-                    cache: 'reload'
-                  }}
-                  style={styles.profileImage}
+                <Image
+                  key={`profile-large-${profilePicture}-${imageKey}`}
+                  source={{ uri: getProfileImageUrl() || undefined, cache: 'reload' as any }}
+                  style={[styles.largeProfileImage, { width: isCompactDevice ? 64 : 72, height: isCompactDevice ? 64 : 72, borderRadius: (isCompactDevice ? 64 : 72) / 2 }]}
                   resizeMode="cover"
                   onError={() => {
-                    console.log('Failed to load profile image in ProfileScreen:', profilePicture);
+                    console.log('Failed to load profile image in profile card:', profilePicture);
                     setProfilePicture(null);
                   }}
                 />
               ) : (
-                <Text style={styles.avatarText}>{getInitials(customerName, customerLastName)}</Text>
+                <Text style={[styles.largeAvatarText, { fontSize: isCompactDevice ? 22 : 25 }]}>{getInitials(customerName, customerLastName)}</Text>
               )}
             </View>
-            <View style={styles.onlineIndicator} />
-          </View>
-          <Text style={styles.welcomeText}>Welcome back!</Text>
-          <Text style={styles.usernameHeader}>{customerUsername || 'User'}</Text>
-        </View>
 
-        {/* Profile Card */}
-        <View style={styles.profileCard}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.profileTitle}>Profile Information</Text>
-            <TouchableOpacity onPress={handleProfile} style={styles.editButton}>
-              <Image source={require('../assets/img/icon/edit-icon.png')} style={styles.editIcon} />
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.userInfo}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Username</Text>
-              <Text style={styles.infoValue}>{customerUsername}</Text>
+            <View style={styles.profileIdentityText}>
+              <Text style={[styles.profileName, { fontSize: isCompactDevice ? 18 : 20 }]} numberOfLines={1}>
+                {getFullName(customerName, customerLastName) || 'No Name'}
+              </Text>
+              <Text style={[styles.profileUsername, { fontSize: isCompactDevice ? 12 : 13 }]} numberOfLines={1}>
+                {`@${customerUsername || 'user'}`}
+              </Text>
             </View>
-            <View style={styles.divider} />
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Full Name</Text>
-              <Text style={styles.infoValue}>{getFullName(customerName, customerLastName)}</Text>
-            </View>
+
+            <Text style={styles.profileChevron}>{'›'}</Text>
           </View>
-        </View>
+          <View style={styles.profileEditBadge} pointerEvents="none">
+            <Image
+              source={require('../assets/img/icon/edit-icon.png')}
+              style={styles.profileEditIcon}
+            />
+          </View>
+        </TouchableOpacity>
 
         {/* Action Buttons */}
         <View style={styles.actionsContainer}>
-          <TouchableOpacity onPress={handleHistory} style={[styles.actionButton, styles.historyButton]}>
+          {/* My Orders Button */}
+          <TouchableOpacity onPress={handleMyOrder} style={[styles.actionButton, styles.ordersButton]}>
             <View style={styles.buttonContent}>
-              <View style={styles.iconContainer}>
-                <Image source={require('../assets/img/icon/history-icon.png')} style={styles.buttonIcon} />
+              <View style={[styles.iconContainer, { width: isCompactDevice ? 38 : 42, height: isCompactDevice ? 38 : 42, borderRadius: (isCompactDevice ? 38 : 42) / 2 }]}>
+                <Image source={require('../assets/img/icon/clothes-hanger.png')} style={[styles.buttonIcon, { width: isCompactDevice ? 18 : 20, height: isCompactDevice ? 18 : 20 }]} />
               </View>
               <View style={styles.buttonTextContainer}>
-                <Text style={styles.buttonTitle}>Transaction History</Text>
-                <Text style={styles.buttonSubtitle}>View your past transactions</Text>
+                <Text style={[styles.buttonTitle, { fontSize: isCompactDevice ? 15 : 16 }]}>My Bookings</Text>
+                <Text style={[styles.buttonSubtitle, { fontSize: isCompactDevice ? 10.5 : 12 }]}>View your current and past orders</Text>
               </View>
-              <Text style={styles.chevron}>›</Text>
+              <Text style={[styles.chevron, { fontSize: 24 }]}>{'›'}</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleHistory} style={[styles.actionButton, styles.historyButton]}>
+            <View style={styles.buttonContent}>
+              <View style={[styles.iconContainer, { width: isCompactDevice ? 38 : 42, height: isCompactDevice ? 38 : 42, borderRadius: (isCompactDevice ? 38 : 42) / 2 }]}>
+                <Image source={require('../assets/img/icon/history-icon.png')} style={[styles.buttonIcon, { width: isCompactDevice ? 18 : 20, height: isCompactDevice ? 18 : 20 }]} />
+              </View>
+              <View style={styles.buttonTextContainer}>
+                <Text style={[styles.buttonTitle, { fontSize: isCompactDevice ? 15 : 16 }]}>Transaction History</Text>
+                <Text style={[styles.buttonSubtitle, { fontSize: isCompactDevice ? 10.5 : 12 }]}>View your past transactions</Text>
+              </View>
+              <Text style={[styles.chevron, { fontSize: 24 }]}>{'›'}</Text>
             </View>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={handleLogout} style={[styles.actionButton, styles.logoutButton]}>
             <View style={styles.buttonContent}>
-              <View style={styles.iconContainer}>
-                <Image source={require('../assets/img/icon/logout-icon.png')} style={styles.buttonIcon} />
+              <View style={[styles.iconContainer, { width: isCompactDevice ? 38 : 42, height: isCompactDevice ? 38 : 42, borderRadius: (isCompactDevice ? 38 : 42) / 2 }]}>
+                <Image source={require('../assets/img/icon/logout-icon.png')} style={[styles.buttonIcon, { width: isCompactDevice ? 18 : 20, height: isCompactDevice ? 18 : 20 }]} />
               </View>
               <View style={styles.buttonTextContainer}>
-                <Text style={[styles.buttonTitle, styles.logoutText]}>Logout</Text>
-                <Text style={[styles.buttonSubtitle, styles.logoutSubtext]}>Sign out of your account</Text>
+                <Text style={[styles.buttonTitle, styles.logoutText, { fontSize: isCompactDevice ? 15 : 16 }]}>Logout</Text>
+                <Text style={[styles.buttonSubtitle, styles.logoutSubtext, { fontSize: isCompactDevice ? 10.5 : 12 }]}>Sign out of your account</Text>
               </View>
-              <Text style={[styles.chevron, styles.logoutText]}>›</Text>
+              <Text style={[styles.chevron, styles.logoutText, { fontSize: 24 }]}>{'›'}</Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -261,7 +325,7 @@ export default function ProfileScreen() {
                     style={styles.modalIcon} 
                   />
                 </View>
-                <Text style={styles.modalTitle}>Logout Confirmation</Text>
+                <Text style={styles.modalTitle}>Logout</Text>
                 <Text style={styles.modalMessage}>
                   Are you sure you want to logout from your account?
                 </Text>
@@ -304,132 +368,101 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1,
   },
-  headerContainer: {
-    alignItems: 'center',
-    paddingTop: height * 0.07,
-    paddingBottom: 25,
-    paddingHorizontal: 20,
-  },
-  profileImageContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  profileImage: {
-    width: 95,
-    height: 95,
-    borderRadius: 47.5,
-  },
-  profileAvatar: {
-    width: 95,
-    height: 95,
-    borderRadius: 47.5,
-    borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  avatarText: {
-    fontSize: 34,
-    fontWeight: '700',
-    color: '#667eea',
-    textAlign: 'center',
-  },
-  onlineIndicator: {
-    position: 'absolute',
-    bottom: 6,
-    right: 6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#5ce361',
-    borderWidth: 2.5,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  welcomeText: {
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontWeight: '500',
-    marginTop: 6,
-    letterSpacing: 0.2,
-  },
-  usernameHeader: {
-    fontSize: 20,
+  sectionTitle: {
     color: '#fff',
+    fontSize: 18,
     fontWeight: '700',
-    marginTop: 3,
+    textAlign: 'center',
+    marginTop: Math.max(30, height * 0.08),
+    marginBottom: 14,
     letterSpacing: 0.3,
-    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowColor: 'rgba(0, 0, 0, 0.12)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   profileCard: {
     backgroundColor: '#fff',
-    marginHorizontal: 20,
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 22,
+    borderRadius: 45,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    marginBottom: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(150, 188, 255, 0.22)',
     shadowColor: '#667eea',
     shadowOffset: {
       width: 0,
       height: 3,
     },
     shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  cardHeader: {
+  profileIdentity: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 18,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f8f9fa',
   },
-  profileTitle: {
-    fontSize: 18,
+  profileAvatarLarge: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    overflow: 'hidden',
+    backgroundColor: '#eef2ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+    borderWidth: 2,
+    borderColor: '#e0e7ff',
+  },
+  largeProfileImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+  },
+  largeAvatarText: {
+    fontSize: 25,
     fontWeight: '700',
+    color: '#667eea',
+  },
+  profileIdentityText: {
+    flex: 1,
+  },
+  profileName: {
     color: '#2c3e50',
-    letterSpacing: 0.2,
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 4,
   },
-  editButton: {
+  profileUsername: {
+    color: '#7f8c8d',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  profileChevron: {
+    color: '#bdc3c7',
+    fontSize: 27,
+    fontWeight: '300',
+    paddingLeft: 8,
+  },
+  profileEditBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: '#667eea',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 10,
-    shadowColor: '#667eea',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
-  editIcon: {
-    width: 16,
-    height: 16,
+  profileEditIcon: {
+    width: 14,
+    height: 14,
     tintColor: '#fff',
   },
   userInfo: {
-    gap: 14,
+    gap: 8,
   },
   infoRow: {
     flexDirection: 'row',
@@ -451,21 +484,22 @@ const styles = StyleSheet.create({
     maxWidth: '60%',
     textAlign: 'right',
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#f1f3f4',
-    marginVertical: 7,
-  },
   actionsContainer: {
-    paddingHorizontal: 20,
-    gap: 16,
+    width: '100%',
+    paddingHorizontal: 18,
+    gap: 9,
     flex: 1,
-    marginTop: 10,
+    marginTop: '25%',
+    justifyContent: 'flex-start',
+    paddingVertical: 14,
   },
   actionButton: {
-    backgroundColor: '#fff',
+    backgroundColor: '#f9fbff',
     borderRadius: 16,
-    padding: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(150, 188, 255, 0.18)',
     shadowColor: '#667eea',
     shadowOffset: {
       width: 0,
@@ -474,6 +508,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 6,
     elevation: 4,
+  },
+  ordersButton: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#00b894',
   },
   historyButton: {
     borderLeftWidth: 4,

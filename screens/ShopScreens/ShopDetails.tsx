@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
+// ...existing code...
+// (No duplicate StyleSheet.create here)
+// ...existing code...
+import React, { useEffect, useRef, useState } from 'react';
 import { 
+  Animated,
+  Easing,
   View, 
   Text, 
   StyleSheet, 
@@ -8,7 +13,8 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Image,
-  Modal
+  Modal,
+  Platform
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import type { RootStackParamList } from '../../navigation/Navigator';
@@ -18,6 +24,7 @@ import LinearGradient from 'react-native-linear-gradient';
 
 import useShops from '../../hook/useShops';
 import useShopServices from '../../hook/useShopServices';
+import { API_CONFIG } from '../../config/api';
 
 type ShopDetailsNavProp = NativeStackNavigationProp< RootStackParamList,'ShopDetails'>;
 type ShopDetailsRouteProp = RouteProp<RootStackParamList, 'ShopDetails'>;
@@ -30,6 +37,13 @@ export default function ShopDetailsScreen() {
   const { shops, loading: shopsLoading, error: shopsError, refresh: refreshShops } = useShops();
   const { services, loading: servicesLoading, refresh: refreshServices } = useShopServices(shop_id);
   const [expandedService, setExpandedService] = useState<number | null>(null);
+  const [shopDetailData, setShopDetailData] = useState<any | null>(null);
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const normalizedShopId = Number(shop_id);
+  const shimmerTranslate = shimmerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-220, 220],
+  });
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'services' | 'about'>('services');
@@ -38,6 +52,28 @@ export default function ShopDetailsScreen() {
   const [isModalVisible, setModalVisible] = useState(false);
   const [selectedType, setSelectedType] = useState<'Walk in' | 'Pick up' | null>(null);
 
+  const shop = shops.find(s => Number(s.shop_id) === normalizedShopId) || shopDetailData || null;
+  const pickupEnabled = !!shop && (shop.pickup_delivery_enabled === true || shop.pickup_delivery_enabled === 1 || String(shop.pickup_delivery_enabled) === '1');
+  const bookingTypes = ['Walk in', ...(pickupEnabled ? ['Pick up'] : [])] as const;
+  const shopName = shop?.name && String(shop.name).trim() ? shop.name : 'Shop';
+
+  useEffect(() => {
+    const fetchShopDetail = async () => {
+      try {
+        const res = await fetch(`${API_CONFIG.BASE_URL}/shop/${normalizedShopId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setShopDetailData(data);
+      } catch (error) {
+        console.log('Failed to fetch shop details for header:', error);
+      }
+    };
+
+    if (!Number.isNaN(normalizedShopId)) {
+      fetchShopDetail();
+    }
+  }, [normalizedShopId]);
+
   const handleMessagePress = () => {
     if (!shop || !shop.admin_id) {
       console.log('❌ Shop or admin_id not available:', { shop, admin_id: shop?.admin_id });
@@ -45,9 +81,10 @@ export default function ShopDetailsScreen() {
     }
     
     // Use shop logo as avatar if available, otherwise use creative icon flag
-    const avatarSource = shop.logo 
-      ? { uri: `http://10.0.2.2:5000${shop.logo}` }
-      : null; // Pass null to trigger creative icon in ConvoScreen
+    const logoUri = shop.logo
+      ? (shop.logo.startsWith('http') ? shop.logo : `${API_CONFIG.BASE_ORIGIN}${shop.logo}`)
+      : null;
+    const avatarSource = logoUri ? { uri: logoUri } : null; // Pass null to trigger creative icon in ConvoScreen
     
     navigation.navigate('Convo', {
       shopName: shop.name,
@@ -65,18 +102,123 @@ export default function ShopDetailsScreen() {
     setRefreshing(false);
   };
 
-  const shop = shops.find(s => s.shop_id === shop_id);
+  useEffect(() => {
+    shimmerAnim.setValue(0);
+    Animated.loop(
+      Animated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [shimmerAnim]);
+
+  const renderShopSkeleton = (errorMessage?: string) => (
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#78e4d7', '#96bcff']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerGradient}
+      >
+        <View style={styles.headerIcons}>
+          <View style={[styles.iconBtn, styles.leftIcon, styles.skeletonCircle]}>
+            <Animated.View
+              style={[
+                styles.skeletonShimmer,
+                { transform: [{ translateX: shimmerTranslate }] },
+              ]}
+            />
+          </View>
+          <View style={[styles.skeletonHeaderTitle, { width: 120 }]}> 
+            <Animated.View
+              style={[
+                styles.skeletonShimmer,
+                { transform: [{ translateX: shimmerTranslate }] },
+              ]}
+            />
+          </View>
+          <View style={[styles.iconBtn, styles.rightIcon, styles.skeletonCircle]}>
+            <Animated.View
+              style={[
+                styles.skeletonShimmer,
+                { transform: [{ translateX: shimmerTranslate }] },
+              ]}
+            />
+          </View>
+        </View>
+        <View style={[styles.shopInfoCard, { padding: 20 }]}> 
+          <View style={styles.shopSkeletonImg}>
+            <Animated.View
+              style={[
+                styles.skeletonShimmer,
+                { transform: [{ translateX: shimmerTranslate }] },
+              ]}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <View style={[styles.skeletonLine, { width: '60%', height: 20, marginBottom: 10 }]}> 
+              <Animated.View
+                style={[
+                  styles.skeletonShimmer,
+                  { transform: [{ translateX: shimmerTranslate }] },
+                ]}
+              />
+            </View>
+            <View style={[styles.skeletonLine, { width: '50%', height: 14, marginBottom: 8 }]}> 
+              <Animated.View
+                style={[
+                  styles.skeletonShimmer,
+                  { transform: [{ translateX: shimmerTranslate }] },
+                ]}
+              />
+            </View>
+            <View style={[styles.skeletonLine, { width: '80%', height: 12 }]}> 
+              <Animated.View
+                style={[
+                  styles.skeletonShimmer,
+                  { transform: [{ translateX: shimmerTranslate }] },
+                ]}
+              />
+            </View>
+          </View>
+        </View>
+      </LinearGradient>
+
+      <View style={styles.tabRow}>
+        <View style={[styles.tabBtn, styles.activeTab, { borderBottomColor: '#147beaff' }]}>
+          <View style={[styles.skeletonLine, { width: '65%', height: 14 }]} />
+        </View>
+        <View style={[styles.tabBtn, { borderBottomColor: 'transparent' }]}>
+          <View style={[styles.skeletonLine, { width: '65%', height: 14 }]} />
+        </View>
+      </View>
+
+      <View style={styles.serviceSkeletonList}>
+        {Array.from({ length: 3 }, (_, i) => (
+          <View key={`service-skeleton-${i}`} style={styles.serviceSkeletonCard}>
+            <View style={styles.serviceSkeletonHeader}>
+              <View style={[styles.serviceSkeletonTitle, { width: '60%' }]} />
+              <View style={styles.serviceSkeletonPrice} />
+            </View>
+            <View style={[styles.serviceSkeletonLine, { width: '90%' }]} />
+            <View style={[styles.serviceSkeletonLine, { width: '70%' }]} />
+          </View>
+        ))}
+      </View>
+
+      {errorMessage ? (
+        <Text style={[styles.centerText, { marginTop: 16, color: '#d9534f' }]}>{errorMessage}</Text>
+      ) : null}
+    </View>
+  );
 
   if (shopsLoading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#007bff" />
-        <Text style={styles.loadingText}>Loading shop info...</Text>
-      </View>
-    );
+    return renderShopSkeleton();
   }
-  if (shopsError) return <Text style={[styles.centerText, { color: 'red' }]}>{shopsError}</Text>;
-  if (!shop) return <Text style={styles.centerText}>Shop not found</Text>;
+  if (shopsError && !shop) return renderShopSkeleton(shopsError);
+  if (!shop) return renderShopSkeleton('Shop not found');
 
   return (
     <View style={styles.container}>
@@ -102,18 +244,12 @@ export default function ShopDetailsScreen() {
                 </TouchableOpacity>
 
                 <Text style={styles.logoText}>eLaba</Text>
-
-                <TouchableOpacity onPress={handleMessagePress} style={[styles.iconBtn, styles.rightIcon]}>
-                  <Image source={require('../../assets/img/icon/chats.png')} style={styles.iconImg} />
-                </TouchableOpacity>
               </View>
-
-
               {/* Shop Info Full Width */}
               <View style={styles.shopInfoCard}>
                 {shop.logo ? (
                   <Image 
-                    source={{ uri: `http://10.0.2.2:5000${shop.logo}` }} 
+                    source={{ uri: shop.logo.startsWith('http') ? shop.logo : `${API_CONFIG.BASE_ORIGIN}${shop.logo}` }} 
                     style={styles.shopImg} 
                   />
                 ) : (
@@ -122,20 +258,19 @@ export default function ShopDetailsScreen() {
                   </View>
                 )}
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.shopName}>{shop.name}</Text>
+                  <Text style={styles.shopName}>{shopName}</Text>
                   <View style={styles.operationHoursContainer}>
                     <View style={styles.operationHoursBadge}>
-                      <Text style={styles.operationHoursLabel}>Hours</Text>
+                      <Text style={styles.operationHoursLabel}>Operating Hours</Text>
                     </View>
-                    <Text style={styles.shopHours}>{shop.operation_hours}</Text>
+                    <Text style={styles.shopHours}>{shop.operation_hours || 'Hours not available'}</Text>
                   </View>
+
+                  <TouchableOpacity onPress={handleMessagePress} style={styles.messageActionRow}>
+                    <Image source={require('../../assets/img/icon/chats.png')} style={styles.messageIcon} />
+                    <Text style={styles.messageText}>Message</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity style={styles.favoriteBtn}>
-                  <Image
-                    source={require('../../assets/img/icon/favorite-icon.png')}
-                    style={styles.favoriteIcon}
-                  />
-                </TouchableOpacity>
               </View>
             </LinearGradient>
 
@@ -165,33 +300,30 @@ export default function ShopDetailsScreen() {
               <View style={styles.aboutContainer}>
                 <View style={styles.aboutCard}>
                   <Text style={styles.aboutTitle}>Shop Information</Text>
-                  
-                  <View style={styles.aboutRow}>
-                    <View style={styles.aboutLabelContainer}>
-                      <Text style={styles.aboutLabel}>Owner</Text>
+                  <View style={styles.aboutRowNew}>
+                    <View style={styles.iconValueWrap}>
+                      <View style={styles.iconContainerNew}>
+                        <Image source={require('../../assets/img/icon/location.png')} style={styles.aboutIconNew} />
+                      </View>
+                      <Text style={styles.aboutValueNew}>{shop.address}</Text>
                     </View>
-                    <Text style={styles.aboutValue}>{shop.owner_name}</Text>
                   </View>
-                  
-                  <View style={styles.aboutRow}>
-                    <View style={styles.aboutLabelContainer}>
-                      <Text style={styles.aboutLabel}>Address</Text>
+                  <View style={styles.aboutRowNew}>
+                    <View style={styles.iconValueWrap}>
+                      <View style={styles.iconContainerNew}>
+                        <Image source={require('../../assets/img/icon/owner.png')} style={styles.aboutIconNew} />
+                      </View>
+                      <Text style={styles.aboutValueNew}>{shop.owner_name}</Text>
                     </View>
-                    <Text style={styles.aboutValue}>{shop.address}</Text>
                   </View>
-                  
-                  <View style={styles.aboutRow}>
-                    <View style={styles.aboutLabelContainer}>
-                      <Text style={styles.aboutLabel}>Website</Text>
+
+                  <View style={styles.aboutRowNew}>
+                    <View style={styles.iconValueWrap}>
+                      <View style={styles.iconContainerNew}>
+                        <Image source={require('../../assets/img/icon/website.png')} style={styles.aboutIconNew} />
+                      </View>
+                      <Text style={styles.aboutValueNew}>{shop.website || "Not Available"}</Text>
                     </View>
-                    <Text style={styles.aboutValue}>{shop.website || "Not Available"}</Text>
-                  </View>
-                  
-                  <View style={styles.aboutRow}>
-                    <View style={styles.aboutLabelContainer}>
-                      <Text style={styles.aboutLabel}>Contact</Text>
-                    </View>
-                    <Text style={styles.aboutValue}>Not Available</Text>
                   </View>
                 </View>
               </View>
@@ -241,21 +373,67 @@ export default function ShopDetailsScreen() {
           ) : null
         }
         ListEmptyComponent={
-          activeTab === 'services' && !servicesLoading ? (
-            <Text style={{ textAlign: 'center', marginTop: 15 }}>No services available</Text>
+          activeTab === 'services' ? (
+            servicesLoading ? (
+              <View style={styles.serviceSkeletonList}>
+                {Array.from({ length: 3 }, (_, i) => (
+                  <View key={`service-skeleton-${i}`} style={styles.serviceSkeletonCard}>
+                    <View style={styles.serviceSkeletonHeader}>
+                      <View style={styles.serviceSkeletonTitle}>
+                        <Animated.View
+                          style={[
+                            styles.skeletonShimmer,
+                            { transform: [{ translateX: shimmerTranslate }] },
+                          ]}
+                        />
+                      </View>
+                      <View style={styles.serviceSkeletonPrice}>
+                        <Animated.View
+                          style={[
+                            styles.skeletonShimmer,
+                            { transform: [{ translateX: shimmerTranslate }] },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.serviceSkeletonLine}>
+                      <Animated.View
+                        style={[
+                          styles.skeletonShimmer,
+                          { transform: [{ translateX: shimmerTranslate }] },
+                        ]}
+                      />
+                    </View>
+                    <View style={[styles.serviceSkeletonLine, styles.serviceSkeletonLineShort]}>
+                      <Animated.View
+                        style={[
+                          styles.skeletonShimmer,
+                          { transform: [{ translateX: shimmerTranslate }] },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={{ textAlign: 'center', marginTop: 15 }}>No services available</Text>
+            )
           ) : null
         }
       />
 
       {/* Floating Book Now Button */}
-      <TouchableOpacity 
-        style={styles.floatingBtn} 
-        onPress={() => {
-          setModalVisible(true);
-        }}
-      >
-        <Text style={styles.floatingBtnText}>Book Now</Text>
-      </TouchableOpacity>
+      {!servicesLoading && services.length > 0 && (
+        <TouchableOpacity 
+          style={styles.floatingBtn} 
+          onPress={() => {
+            setSelectedType('Walk in');
+            setModalVisible(true);
+          }}
+        >
+          <Text style={styles.floatingBtnText}>Book Now</Text>
+        </TouchableOpacity>
+      )}
 
       {/* BOOKING TYPE MODAL */}
       <Modal
@@ -268,7 +446,7 @@ export default function ShopDetailsScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Select Booking Type</Text>
 
-            {['Walk in', 'Pick up'].map(type => (
+            {bookingTypes.map(type => (
               <TouchableOpacity 
                 key={type} 
                 style={styles.radioRow}
@@ -293,11 +471,11 @@ export default function ShopDetailsScreen() {
                   onPress={() => {
                     if (selectedType) {
                       setModalVisible(false);
-                      navigation.navigate('BookingService', { 
+                      navigation.navigate('BookingService', {
                         type: selectedType,
                         shop_id,
-                        shop_name: shop.name,
-                        services: services,                 
+                        shop_name: shopName,
+                        services,
                       });
                     }
                   }}
@@ -367,6 +545,88 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 3,
   },
+  shopSkeletonImg: {
+    width: 100,
+    height: 100,
+    borderRadius: 16,
+    backgroundColor: '#e8e8ef',
+    marginRight: 18,
+    overflow: 'hidden',
+  },
+  skeletonCircle: {
+    backgroundColor: '#e8e8ef',
+    overflow: 'hidden',
+  },
+  skeletonHeaderTitle: {
+    height: 18,
+    borderRadius: 10,
+    backgroundColor: '#e8e8ef',
+    overflow: 'hidden',
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: 8,
+    backgroundColor: '#e8e8ef',
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  serviceSkeletonList: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+  },
+  serviceSkeletonCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#eef0f5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  serviceSkeletonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  serviceSkeletonTitle: {
+    width: '65%',
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#e8e8ef',
+    overflow: 'hidden',
+  },
+  serviceSkeletonPrice: {
+    width: 50,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#e8e8ef',
+    overflow: 'hidden',
+  },
+  serviceSkeletonLine: {
+    height: 12,
+    borderRadius: 8,
+    backgroundColor: '#e8e8ef',
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  serviceSkeletonLineShort: {
+    width: '60%',
+    overflow: 'hidden',
+  },
+  skeletonShimmer: {
+    position: 'absolute',
+    left: -220,
+    top: 0,
+    bottom: 0,
+    width: 220,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
   shopImg: { 
     width: 100, 
     height: 100, 
@@ -403,40 +663,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 4,
+    flexWrap: 'wrap',
   },
   operationHoursBadge: {
-    backgroundColor: '#e8f4fd',
+    backgroundColor: '#eaf5ff',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
     marginRight: 8,
   },
   operationHoursLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#2196F3',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#147be9',
+    letterSpacing: 0.3,
   },
   shopHours: { 
-    fontSize: 15, 
+    fontSize: 14, 
     color: '#555', 
     fontWeight: '500',
-  }, 
-  favoriteBtn: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    padding: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 15,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 3,
-    elevation: 2,
+    flexShrink: 1,
   },
-  favoriteIcon: { width: 16, height: 16, resizeMode: 'contain' },
+  messageActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#eaf5ff',
+    borderRadius: 999,
+  },
+  messageIcon: {
+    width: 18,
+    height: 18,
+    tintColor: '#147be9',
+    marginRight: 6,
+  },
+  messageText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#147be9',
+    letterSpacing: 0.2,
+  },
   
   // TAB ROW
   tabRow: {
@@ -553,11 +822,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     padding: 24,
     borderRadius: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
-    elevation: 3,
+    shadowColor: '#78e4d7',
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#f8fbff',
   },
   aboutTitle: { 
     fontSize: 20, 
@@ -569,34 +840,56 @@ const styles = StyleSheet.create({
   aboutRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
-    paddingBottom: 16,
+    marginBottom: 20,
+    paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
+    borderBottomColor: '#f0f4f8',
   },
   aboutLabelContainer: {
-    minWidth: 80,
+    minWidth: 120,
     marginRight: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f8ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    shadowColor: '#4a90e2',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  aboutIcon: {
+    width: 20,
+    height: 20,
+    resizeMode: 'contain',
+    tintColor: '#4a90e2',
   },
   aboutLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#2196F3',
+    color: '#4a90e2',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   aboutValue: {
     fontSize: 15,
-    color: '#444',
+    color: '#2c3e50',
     flex: 1,
     lineHeight: 22,
     fontWeight: '500',
   },
 
   // FLOATING BUTTON
-  floatingBtn: {
-    position: 'absolute',
-    bottom: 24,
+    floatingBtn: {
+      position: 'absolute',
+    bottom: Platform.OS === 'android' ? 36 : 24,
     right: 24,
     backgroundColor: '#007bff',
     paddingHorizontal: 28,
@@ -607,7 +900,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 10,
     elevation: 8,
-  },
+    },
   floatingBtnText: { 
     color: '#fff', 
     fontSize: 16, 
@@ -687,5 +980,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
     letterSpacing: 0.3,
-  }
+  },
+  // Redesigned About Section Styles
+  aboutRowNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+    paddingBottom: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f4f8',
+    justifyContent: 'flex-start',
+  },
+  iconValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  iconContainerNew: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#e8f4fd',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+    shadowColor: '#4a90e2',
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  aboutIconNew: {
+    width: 22,
+    height: 22,
+    resizeMode: 'contain',
+    tintColor: '#2196F3',
+  },
+  aboutValueNew: {
+    fontSize: 14,
+    color: '#1a1a1a',
+    fontWeight: '600',
+    flexShrink: 1,
+    lineHeight: 22,
+    letterSpacing: 0.1,
+  },
+// ...existing code...
 });

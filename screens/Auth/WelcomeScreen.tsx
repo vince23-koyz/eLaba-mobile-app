@@ -156,26 +156,7 @@ const WelcomeScreen: React.FC = () => {
               }
             ]}
           >
-            <View style={styles.featureItem}>
-              <View style={styles.featureIcon}>
-                <Text style={styles.featureEmoji}>🚀</Text>
-              </View>
-              <Text style={styles.featureText}>Quick & Easy</Text>
-            </View>
-            
-            <View style={styles.featureItem}>
-              <View style={styles.featureIcon}>
-                <Text style={styles.featureEmoji}>🛡️</Text>
-              </View>
-              <Text style={styles.featureText}>Safe & Secure</Text>
-            </View>
-            
-            <View style={styles.featureItem}>
-              <View style={styles.featureIcon}>
-                <Text style={styles.featureEmoji}>⭐</Text>
-              </View>
-              <Text style={styles.featureText}>Premium Quality</Text>
-            </View>
+
           </Animated.View>
         </View>
 
@@ -203,7 +184,7 @@ const WelcomeScreen: React.FC = () => {
           </TouchableOpacity>
           
           <Text style={styles.footerText}>
-            Join thousands of satisfied customers
+            version 1.0.0
           </Text>
         </Animated.View>
       </SafeAreaView>

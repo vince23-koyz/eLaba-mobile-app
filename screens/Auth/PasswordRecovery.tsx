@@ -9,34 +9,31 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   Platform,
-  Alert,
   Image,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/Navigator';
+import { api, API_ENDPOINTS } from '../../config/api';
+import { useAlert } from '../../context/AlertContext';
 
 export default function PasswordRecovery() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { showAlert } = useAlert();
 
   const [step, setStep] = useState(1); // 1: Phone Number, 2: OTP, 3: New Password
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
-  const [generatedOTP, setGeneratedOTP] = useState('');
   const [showPhoneValidation, setShowPhoneValidation] = useState(false);
-
-  // Generate a random 6-digit OTP
-  const generateOTP = () => {
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOTP(otp);
-    return otp;
-  };
+  const [phoneError, setPhoneError] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const otpRefs = React.useRef<Array<TextInput | null>>([]);
 
   // Validate Philippine phone number
   const validatePhoneNumber = (phone: string) => {
@@ -91,10 +88,43 @@ export default function PasswordRecovery() {
     return text.length > 0 && /^[a-zA-Z]/.test(text.trim());
   };
 
+  // Handle OTP input for individual boxes
+  const handleOTPChange = (value: string, index: number) => {
+    if (!/^\d*$/.test(value)) return; // Only allow digits
+
+    if (otpError) {
+      setOtpError('');
+    }
+
+    const newOtp = [...otp];
+    newOtp[index] = value;
+    setOtp(newOtp);
+
+    // Auto-focus to next box if digit is entered
+    if (value && index < 5) {
+      otpRefs.current[index + 1]?.focus();
+    }
+  };
+
+  // Handle backspace to go to previous box
+  const handleOTPKeyPress = (e: any, index: number) => {
+    if (e.nativeEvent.key === 'Backspace' && !otp[index] && index > 0) {
+      otpRefs.current[index - 1]?.focus();
+    }
+  };
+
+  // Check if all OTP boxes are filled
+  const isOTPComplete = () => {
+    return otp.every((digit) => digit.trim() !== '');
+  };
+
   // Handle phone number input change
   const handlePhoneNumberChange = (text: string) => {
     setPhoneNumber(text);
-    
+    if (phoneError) {
+      setPhoneError('');
+    }
+
     // Show validation warning only if user starts typing with a letter
     if (text.length === 1 && startsWithLetter(text)) {
       setShowPhoneValidation(true);
@@ -106,101 +136,75 @@ export default function PasswordRecovery() {
 
   const handleSendOTP = async () => {
     if (!phoneNumber.trim()) {
-      Alert.alert('Error', 'Please enter your phone number.');
+      setPhoneError('Please enter your phone number.');
       return;
     }
 
-    // Validate phone number format
     if (!validatePhoneNumber(phoneNumber)) {
-      Alert.alert(
-        'Invalid Phone Number', 
-        'Please enter a valid Philippine phone number.\n\nValid formats:\n• +63 9XX XXX XXXX\n• 09XX XXX XXXX\n• 9XX XXX XXXX'
+      showAlert(
+        'Invalid Phone Number',
+        'Please enter a valid Philippine phone number.\n\nValid formats:\n• +63 9XX XXX XXXX\n• 09XX XXX XXXX\n• 9XX XXX XXXX',
+        undefined,
+        'warning'
       );
       return;
     }
 
+    const normalizedPhone = getNormalizedPhoneNumber(phoneNumber);
     setLoading(true);
+
     try {
-      // Generate temporary OTP for testing
-      const tempOTP = generateOTP();
-      console.log('🔐 Generated OTP for testing:', tempOTP);
-      
-      // For development: Show OTP in alert for easy testing
-      // Comment out this alert in production
-      Alert.alert(
-        'OTP Generated', 
-        `Your temporary OTP is: ${tempOTP}\n\n(This is for testing purposes only)`,
-        [{ text: 'OK' }]
-      );
-
-      // Simulate API call to send OTP
-      // In production, this would send OTP via SMS
-      setTimeout(() => {
-        Alert.alert('OTP Sent', 'A verification code has been sent to your phone.');
-        setStep(2);
-        startResendTimer();
-        setLoading(false);
-      }, 1000);
-
-      /* 
-      // uncomment in future when backend is ready
-      const response = await axios.post(
-        'http://10.0.2.2:5000/api/customers/forgot-password',
-        { phone_number: phoneNumber },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await api.post(API_ENDPOINTS.CUSTOMERS.FORGOT_PASSWORD, { phone_number: normalizedPhone });
 
       if (response.data?.success) {
-        Alert.alert('OTP Sent', 'A verification code has been sent to your phone.');
+        if (response.data?.otp) {
+          console.log('🔐 Generated OTP:', response.data.otp);
+        }
+        setOtp(['', '', '', '', '', '']);
+        setOtpError('');
         setStep(2);
         startResendTimer();
       } else {
-        Alert.alert('Error', response.data?.message || 'Phone number not found.');
+        showAlert('Error', response.data?.message || 'Failed to send OTP.', undefined, 'error');
       }
-      */
     } catch (error: any) {
       console.log('Send OTP Error:', error.response?.data || error.message || error);
-      Alert.alert('Error', 'Failed to send OTP. Please try again.');
+      showAlert('Error', error.response?.data?.message || 'Failed to send OTP. Please try again.', undefined, 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleVerifyOTP = async () => {
-    if (!otp.trim()) {
-      Alert.alert('Error', 'Please enter the OTP code.');
+    const otpString = otp.join('');
+    if (!otpString.trim()) {
+      showAlert('Error', 'Please enter the OTP code.', undefined, 'warning');
       return;
     }
 
     setLoading(true);
-    try {
-      // Verify OTP against the generated one
-      if (otp === generatedOTP) {
-        Alert.alert('Success', 'OTP verified successfully.');
-        setStep(3);
-      } else {
-        Alert.alert('Error', 'Invalid OTP code. Please try again.');
-        return;
-      }
 
-      /* 
-      // uncomment in future when backend is ready
-      const response = await axios.post(
-        'http://10.0.2.2:5000/api/customers/verify-otp',
-        { phone_number: phoneNumber, otp: otp },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+    try {
+      const response = await api.post(API_ENDPOINTS.CUSTOMERS.VERIFY_OTP, {
+        phone_number: getNormalizedPhoneNumber(phoneNumber),
+        otp: otpString,
+      });
 
       if (response.data?.success) {
-        Alert.alert('Success', 'OTP verified successfully.');
+        setOtpError('');
+        showAlert('Success', 'OTP verified successfully.', undefined, 'success');
+        setOtp(['', '', '', '', '', '']); // Reset OTP
         setStep(3);
       } else {
-        Alert.alert('Error', response.data?.message || 'Invalid OTP code.');
+        setOtp(['', '', '', '', '', '']);
+        setOtpError(response.data?.message || 'Incorrect code. Please try again.');
+        otpRefs.current[0]?.focus();
       }
-      */
     } catch (error: any) {
-      console.log('Verify OTP Error:', error.response?.data || error.message || error);
-      Alert.alert('Error', 'Failed to verify OTP. Please try again.');
+      console.log('Verify OTP Error:', error.message || error);
+      setOtp(['', '', '', '', '', '']);
+      setOtpError(error.response?.data?.message || 'Incorrect code. Please try again.');
+      otpRefs.current[0]?.focus();
     } finally {
       setLoading(false);
     }
@@ -208,62 +212,43 @@ export default function PasswordRecovery() {
 
   const handleResetPassword = async () => {
     if (!newPassword.trim() || !confirmPassword.trim()) {
-      Alert.alert('Error', 'Please fill in both password fields.');
+      showAlert('Error', 'Please fill in both password fields.', undefined, 'warning');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match.');
+      showAlert('Error', 'Passwords do not match.', undefined, 'warning');
       return;
     }
 
     if (newPassword.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters long.');
+      showAlert('Error', 'Password must be at least 6 characters long.', undefined, 'warning');
       return;
     }
 
+    const normalizedPhone = getNormalizedPhoneNumber(phoneNumber);
     setLoading(true);
+
     try {
-      // For testing purposes, simulate successful password reset
-      Alert.alert('Success', 'Password has been reset successfully!', [
-        { 
-          text: 'OK', 
-          onPress: () => navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          })
-        }
-      ]);
+      const response = await api.post(API_ENDPOINTS.AUTH.RESET_PASSWORD, {
+        phone_number: normalizedPhone,
+        new_password: newPassword,
+      });
 
-      /* 
-      // uncomment in future when backend is ready
-      const response = await axios.post(
-        'http://10.0.2.2:5000/api/customers/reset-password',
-        { 
-          phone_number: phoneNumber, 
-          otp: otp,
-          new_password: newPassword 
-        },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (response.data?.success) {
-        Alert.alert('Success', 'Password has been reset successfully!', [
-          { 
-            text: 'OK', 
-            onPress: () => navigation.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            })
-          }
-        ]);
+      const data = response.data;
+      if (data?.success) {
+        showAlert(
+          'Success',
+          'Password has been reset successfully!',
+          [{ text: 'OK', primary: true, onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Login' }] }) }],
+          'success'
+        );
       } else {
-        Alert.alert('Error', response.data?.message || 'Failed to reset password.');
+        showAlert('Error', data?.message || 'Failed to reset password.', undefined, 'error');
       }
-      */
     } catch (error: any) {
       console.log('Reset Password Error:', error.response?.data || error.message || error);
-      Alert.alert('Error', 'Failed to reset password. Please try again.');
+      showAlert('Error', error.response?.data?.message || 'Failed to reset password. Please try again.', undefined, 'error');
     } finally {
       setLoading(false);
     }
@@ -271,44 +256,30 @@ export default function PasswordRecovery() {
 
   const handleResendOTP = async () => {
     if (resendTimer > 0) return;
+    if (!phoneNumber.trim()) {
+      showAlert('Error', 'Please enter your phone number before resending OTP.', undefined, 'warning');
+      return;
+    }
 
+    const normalizedPhone = getNormalizedPhoneNumber(phoneNumber);
     setLoading(true);
+
     try {
-      // Generate new OTP for testing
-      const newOTP = generateOTP();
-      console.log('🔐 New OTP generated:', newOTP);
-      
-      // For development: Show new OTP in alert
-      Alert.alert(
-        'New OTP Generated', 
-        `Your new OTP is: ${newOTP}\n\n(This is for testing purposes only)`,
-        [{ text: 'OK' }]
-      );
-
-      setTimeout(() => {
-        Alert.alert('OTP Sent', 'A new verification code has been sent to your phone.');
-        startResendTimer();
-        setLoading(false);
-      }, 1000);
-
-      /* 
-      // uncomment in future when backend is ready
-      const response = await axios.post(
-        'http://10.0.2.2:5000/api/customers/forgot-password',
-        { phone_number: phoneNumber },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await api.post(API_ENDPOINTS.CUSTOMERS.FORGOT_PASSWORD, { phone_number: normalizedPhone });
 
       if (response.data?.success) {
-        Alert.alert('OTP Sent', 'A new verification code has been sent to your phone.');
+        if (response.data?.otp) {
+          console.log('🔐 Generated OTP:', response.data.otp);
+        }
+        setOtp(['', '', '', '', '', '']);
+        setOtpError('');
         startResendTimer();
       } else {
-        Alert.alert('Error', response.data?.message || 'Failed to resend OTP.');
+        showAlert('Error', response.data?.message || 'Failed to resend OTP.', undefined, 'error');
       }
-      */
     } catch (error: any) {
       console.log('Resend OTP Error:', error.response?.data || error.message || error);
-      Alert.alert('Error', 'Failed to resend OTP. Please try again.');
+      showAlert('Error', error.response?.data?.message || 'Failed to resend OTP. Please try again.', undefined, 'error');
     } finally {
       setLoading(false);
     }
@@ -331,6 +302,9 @@ export default function PasswordRecovery() {
     if (step === 1) {
       navigation.goBack();
     } else {
+      if (step === 2) {
+        setOtp(['', '', '', '', '', '']); // Reset OTP when going back
+      }
       setStep(step - 1);
     }
   };
@@ -362,6 +336,7 @@ export default function PasswordRecovery() {
       <TextInput
         style={[
           styles.input,
+          phoneError ? styles.inputError : null,
           showPhoneValidation && phoneNumber.trim() && !validatePhoneNumber(phoneNumber) && styles.inputError
         ]}
         placeholder="+63 9XX XXX XXXX"
@@ -372,8 +347,14 @@ export default function PasswordRecovery() {
         autoFocus
       />
 
+      {phoneError ? (
+        <View style={styles.validationContainer}>
+          <Text style={styles.validationText}>{phoneError}</Text>
+        </View>
+      ) : null}
+
       {/* Validation feedback - only show if user started with letter or has invalid format after starting with letter */}
-      {showPhoneValidation && phoneNumber.trim() && !validatePhoneNumber(phoneNumber) && (
+      {showPhoneValidation && phoneNumber.trim() && !validatePhoneNumber(phoneNumber) && !phoneError && (
         <View style={styles.validationContainer}>
           <Text style={styles.validationText}>
             Please enter a valid Philippine phone number
@@ -408,27 +389,36 @@ export default function PasswordRecovery() {
     <View style={styles.form}>
       <Text style={styles.stepTitle}>Enter Verification Code</Text>
       <Text style={styles.stepDescription}>
-        Enter the 6-digit code sent to {phoneNumber}
+        We've sent 6 code to  {phoneNumber}
       </Text>
 
-      {/* Development Helper - Remove in production */}
-      {__DEV__ && generatedOTP && (
-        <View style={styles.devHelper}>
-          <Text style={styles.devHelperText}>🔧 Dev Mode: Current OTP is {generatedOTP}</Text>
-        </View>
-      )}
+      {/* 6 OTP Input Boxes */}
+      <View style={[styles.otpContainer, otpError ? styles.otpContainerError : null]}>
+        {otp.map((digit, index) => (
+          <TextInput
+            key={index}
+            ref={(ref) => {
+              if (ref) otpRefs.current[index] = ref;
+            }}
+            style={[styles.otpBox, otpError ? styles.otpBoxError : null]}
+            placeholder="-"
+            placeholderTextColor="#ccc"
+            keyboardType="number-pad"
+            value={digit}
+            onChangeText={(value) => handleOTPChange(value, index)}
+            onKeyPress={(e) => handleOTPKeyPress(e, index)}
+            maxLength={1}
+            textAlign="center"
+            editable={!loading}
+          />
+        ))}
+      </View>
 
-      <Text style={styles.label}>OTP Code</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Enter 6-digit code"
-        placeholderTextColor="#3D3D3D"
-        keyboardType="number-pad"
-        value={otp}
-        onChangeText={setOtp}
-        maxLength={6}
-        autoFocus
-      />
+      {otpError ? (
+        <View style={styles.otpErrorContainer}>
+          <Text style={styles.otpErrorText}>{otpError}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.resendContainer}>
         <Text style={styles.resendText}>Didn't receive the code? </Text>
@@ -444,11 +434,11 @@ export default function PasswordRecovery() {
 
       <TouchableOpacity 
         onPress={handleVerifyOTP} 
-        style={[styles.button, loading && styles.buttonDisabled]}
-        disabled={loading}
+        style={[styles.button, (!isOTPComplete() || loading) && styles.buttonDisabled]}
+        disabled={!isOTPComplete() || loading}
       >
         <Text style={styles.buttonText}>
-          {loading ? 'Verifying...' : 'Verify OTP'}
+          {loading ? 'Verifying...' : 'Verify'}
         </Text>
       </TouchableOpacity>
     </View>
@@ -497,6 +487,19 @@ export default function PasswordRecovery() {
           value={confirmPassword}
           onChangeText={setConfirmPassword}
         />
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setPasswordVisible(!passwordVisible)}
+        >
+          <Image
+            source={
+              passwordVisible
+                ? require('../../assets/img/icon/visibility.png')
+                : require('../../assets/img/icon/visibility-off.png')
+            }
+            style={styles.eyeIcon}
+          />
+        </TouchableOpacity>
       </View>
 
       <TouchableOpacity 
@@ -526,7 +529,7 @@ export default function PasswordRecovery() {
           <View style={styles.content}>
             <View style={styles.header}>
               <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-                <Text style={styles.backButtonText}>← Back</Text>
+                <Image source={require('../../assets/img/icon/back.png')} style={styles.backIcon} />
               </TouchableOpacity>
               
               <View style={styles.titleContainer}>
@@ -574,10 +577,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginBottom: 20,
   },
-  backButtonText: {
-    fontSize: 16,
-    color: '#2b7ecb',
-    fontWeight: '600',
+  backIcon: {
+    width: 26,
+    height: 26,
   },
   titleContainer: {
     alignItems: 'center',
@@ -697,7 +699,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   buttonDisabled: {
-    backgroundColor: '#888',
+    backgroundColor: '#cccccc',
   },
   buttonText: {
     color: '#fff',
@@ -736,22 +738,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 14,
   },
-  // Development helper styles
-  devHelper: {
-    backgroundColor: '#fff3cd',
-    borderColor: '#ffeaa7',
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 15,
-    alignSelf: 'stretch',
-  },
-  devHelperText: {
-    color: '#856404',
-    fontSize: 12,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
   // Phone validation styles
   inputError: {
     borderColor: '#dc3545',
@@ -784,5 +770,41 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#6c757d',
     lineHeight: 16,
+  },
+  // OTP Input Boxes styles
+  otpContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 20,
+    gap: 8,
+  },
+  otpContainerError: {
+    borderColor: '#dc3545',
+  },
+  otpBox: {
+    flex: 1,
+    height: 50,
+    backgroundColor: '#fffcf2',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#89bfb8',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+  },
+  otpBoxError: {
+    borderColor: '#dc3545',
+  },
+  otpErrorContainer: {
+    width: '100%',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  otpErrorText: {
+    color: '#dc3545',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

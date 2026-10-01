@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Image, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, TextInput, Alert, ScrollView
+  Image, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, TextInput, ScrollView, Modal
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -8,7 +8,8 @@ import {launchImageLibrary, launchCamera, ImageLibraryOptions, ImagePickerRespon
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/Navigator';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
+import { api, API_ENDPOINTS, API_CONFIG } from '../config/api';
+import Icons from '../components/Icons';
 
 export default function MyProfile() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -28,7 +29,13 @@ export default function MyProfile() {
     city: '',
     profile_picture: ''
   });
-  const [imageKey, setImageKey] = useState(Date.now()); // For cache busting
+  const [imageKey, setImageKey] = useState(Date.now());
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [appAlert, setAppAlert] = useState<{visible: boolean, title: string, message: string, onOk?: () => void}>({visible: false, title: '', message: '', onOk: undefined});
+
+  const showAppAlert = (title: string, message: string, onOk?: () => void) => {
+    setAppAlert({ visible: true, title, message, onOk });
+  };
   const [editedData, setEditedData] = useState({
     username: '',
     firstName: '',
@@ -38,6 +45,16 @@ export default function MyProfile() {
     barangay: '',
     city: '',
   });
+
+  const maskPhoneNumber = (phone: string) => {
+    if (!phone) return 'Not set';
+    const digits = phone.replace(/\D/g, '');
+    // Keep first 4 and last 4 digits visible
+    if (digits.length <= 8) return digits;
+    const start = digits.slice(0, 4);
+    const end = digits.slice(-4);
+    return `${start} **** ${end}`;
+  };
 
   // Function to get initials from customer first and last name
   const getInitials = (firstName: string | null, lastName: string | null): string => {
@@ -64,12 +81,11 @@ export default function MyProfile() {
       const customerId = await AsyncStorage.getItem('customerId');
       
       if (!customerId) {
-        Alert.alert('Error', 'Please login again');
-        navigation.navigate('Login');
+        showAppAlert('Error', 'Please login again', () => navigation.navigate('Login'));
         return;
       }
 
-      const response = await axios.get(`http://10.0.2.2:5000/api/customers/${customerId}`);
+  const response = await api.get(API_ENDPOINTS.CUSTOMERS.BY_ID(customerId));
       
       if (response.data) {
         console.log('Fetched user data:', response.data);
@@ -84,31 +100,19 @@ export default function MyProfile() {
     } catch (error: any) {
       console.error('Error fetching user data:', error);
       console.error('Fetch error response:', error.response?.data);
-      Alert.alert('Error', 'Failed to load profile data');
+  showAppAlert('Error', 'Failed to load profile data');
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle profile picture selection and upload
-  const handleProfilePictureUpdate = () => {
-    if (saving || !isEditing) return; // Prevent multiple simultaneous uploads and only allow in edit mode
-    
-    Alert.alert(
-      'Update Profile Picture',
-      'Choose an option',
-      [
-        { text: 'Camera', onPress: () => openCamera() },
-        { text: 'Gallery', onPress: () => openGallery() },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
-  };
+  // Disabled: profile photo changes are not allowed from Edit Profile
+  const handleProfilePictureUpdate = () => {};
 
   const openCamera = () => {
     const options: ImageLibraryOptions = {
       mediaType: 'photo',
-      includeBase64: false,
+      includeBase64: true, // enable base64 fallback for Android content:// URIs
       maxHeight: 1024,
       maxWidth: 1024,
       quality: 0.7,
@@ -121,7 +125,7 @@ export default function MyProfile() {
   const openGallery = () => {
     const options: ImageLibraryOptions = {
       mediaType: 'photo',
-      includeBase64: false,
+      includeBase64: true, // enable base64 fallback for Android content:// URIs
       maxHeight: 1024,
       maxWidth: 1024,
       quality: 0.7,
@@ -137,7 +141,7 @@ export default function MyProfile() {
     }
 
     if (response.errorMessage) {
-      Alert.alert('Error', response.errorMessage);
+      showAppAlert('Error', response.errorMessage);
       return;
     }
 
@@ -146,37 +150,32 @@ export default function MyProfile() {
       
       // Validate file size (max 5MB)
       if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
-        Alert.alert('Error', 'Image size too large. Please select an image smaller than 5MB.');
+        showAppAlert('Error', 'Image size too large. Please select an image smaller than 5MB.');
         return;
       }
 
       // Validate file type
       if (asset.type && !asset.type.startsWith('image/')) {
-        Alert.alert('Error', 'Please select a valid image file.');
+        showAppAlert('Error', 'Please select a valid image file.');
         return;
       }
 
       try {
         setSaving(true);
         
-        // Show uploading alert
-        const uploadingAlert = Alert.alert(
-          'Uploading...', 
-          'Please wait while we upload your profile picture.',
-          [],
-          { cancelable: false }
-        );
+        // Optionally show uploading modal/spinner (already handled by saving state)
         
         // Generate unique filename
         const timestamp = Date.now();
         const fileExtension = asset.fileName?.split('.').pop() || 'jpg';
         const fileName = `profile_${userData.customer_id}_${timestamp}.${fileExtension}`;
         
-        // Create FormData for file upload
+        // Build FormData with the raw URI. fetch in RN supports file:// and content://
+        const mimeType = asset.type || (fileExtension.toLowerCase() === 'png' ? 'image/png' : 'image/jpeg');
         const formData = new FormData();
         formData.append('profilePicture', {
-          uri: asset.uri,
-          type: asset.type || 'image/jpeg',
+          uri: asset.uri as string,
+          type: mimeType,
           name: fileName,
         } as any);
 
@@ -187,23 +186,29 @@ export default function MyProfile() {
         
         while (retryCount <= maxRetries) {
           try {
-            uploadResponse = await axios.post(
-              `http://10.0.2.2:5000/api/customers/${userData.customer_id}/profile-picture`,
-              formData,
+            const res = await fetch(
+              `${API_CONFIG.BASE_URL}${API_ENDPOINTS.CUSTOMERS.PROFILE_PICTURE(userData.customer_id)}`,
               {
+                method: 'POST',
+                body: formData,
                 headers: {
-                  'Content-Type': 'multipart/form-data',
+                  Accept: 'application/json',
+                  // NOTE: Do NOT set Content-Type; RN will set correct multipart boundary
                 },
-                timeout: 30000, // 30 seconds timeout
               }
             );
-            break; // Success, exit retry loop
+            let data: any = {};
+            try { data = await res.json(); } catch {}
+            if (!res.ok) {
+              const err: any = new Error('Upload failed');
+              err.response = { status: res.status, data };
+              throw err;
+            }
+            uploadResponse = { data };
+            break; // Success
           } catch (retryError: any) {
             retryCount++;
-            if (retryCount > maxRetries) {
-              throw retryError; // Final attempt failed
-            }
-            // Wait before retry (exponential backoff)
+            if (retryCount > maxRetries) throw retryError;
             await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
           }
         }
@@ -224,19 +229,7 @@ export default function MyProfile() {
           // Then refresh from server for consistency
           await fetchUserData();
           
-          Alert.alert(
-            'Success', 
-            'Profile picture updated successfully!',
-            [
-              {
-                text: 'OK',
-                onPress: () => {
-                  // Optional: Exit edit mode after successful upload
-                  // setIsEditing(false);
-                }
-              }
-            ]
-          );
+          showAppAlert('Success', 'Profile picture updated successfully!');
         } else {
           throw new Error(uploadResponse?.data?.message || 'Upload failed');
         }
@@ -251,12 +244,12 @@ export default function MyProfile() {
         } else if (error.response?.status === 400) {
           errorMessage += error.response.data?.message || 'Invalid file format.';
         } else if (error.response?.status >= 500) {
-          errorMessage += 'Server error. Please try again later.';
+          errorMessage += error.response?.data?.message ? `Server error: ${error.response.data.message}` : 'Server error. Please try again later.';
         } else {
-          errorMessage += 'Please check your internet connection and try again.';
+          errorMessage += error.message ? `Network error: ${error.message}` : 'Please check your internet connection and try again.';
         }
         
-        Alert.alert('Upload Failed', errorMessage);
+  showAppAlert('Upload Failed', errorMessage);
       } finally {
         setSaving(false);
       }
@@ -303,7 +296,7 @@ export default function MyProfile() {
 
   const handleSave = async () => {
     if (!editedData.firstName.trim() || !editedData.lastName.trim() || !editedData.username.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields (Username, First Name, Last Name)');
+      showAppAlert('Error', 'Please fill in all required fields (Username, First Name, Last Name)');
       return;
     }
 
@@ -311,29 +304,28 @@ export default function MyProfile() {
     try {
       // Use customer ID from userData
       if (!userData.customer_id) {
-        Alert.alert('Error', 'Customer ID not found. Please login again.');
+        showAppAlert('Error', 'Customer ID not found. Please login again.');
         return;
       }
 
       // Save to database via API   
-      const response = await axios.put(`http://10.0.2.2:5000/api/customers/${userData.customer_id}`, {
-        first_name: editedData.firstName,
-        last_name: editedData.lastName,
-        username: editedData.username,
-        street: editedData.street,
-        zone: editedData.zone,
-        barangay: editedData.barangay,
-        city: editedData.city,
-      });
+  const response = await api.put(API_ENDPOINTS.CUSTOMERS.BY_ID(userData.customer_id), {
+            first_name: editedData.firstName,
+            last_name: editedData.lastName,
+            username: editedData.username,
+            street: editedData.street,
+            zone: editedData.zone,
+            barangay: editedData.barangay,
+            city: editedData.city,
+          });
 
       if (response.data.success) {
         // Refresh data from database to get the latest info
         await fetchUserData();
-        
-        Alert.alert('Success', 'Profile updated successfully!');
+        showAppAlert('Success', 'Profile updated successfully!');
         setIsEditing(false);
       } else {
-        Alert.alert('Error', response.data.message || 'Failed to update profile');
+        showAppAlert('Error', response.data.message || 'Failed to update profile');
       }
     } catch (error: any) {
       console.error('Error saving profile:', error);
@@ -347,7 +339,7 @@ export default function MyProfile() {
         errorMessage = 'Server error. Please try again later.';
       }
       
-      Alert.alert('Error', errorMessage);
+  showAppAlert('Error', errorMessage);
     } finally {
       setSaving(false);
     }
@@ -361,10 +353,19 @@ export default function MyProfile() {
       style={styles.container}
     >
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Image source={require('../assets/img/icon/back.png')} style={styles.backIcon} />
-        </TouchableOpacity>
-        <Text style={styles.title}>My Profile</Text>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Image source={require('../assets/img/icon/back.png')} style={styles.backIcon} />
+            </TouchableOpacity>
+            <Text style={styles.title}>My Profile</Text>
+            {/* Move Edit button to header */}
+            {!isEditing && (
+              <TouchableOpacity 
+                style={styles.headerEditButton}
+                onPress={handleEdit}
+              >
+                <Text style={styles.headerEditText}>Edit</Text>
+              </TouchableOpacity>
+            )}
       </View>
 
       <ScrollView 
@@ -372,32 +373,26 @@ export default function MyProfile() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity 
+        <View 
           style={[
-            styles.profilePicWrapper, 
-            (saving || !isEditing) && styles.profilePicDisabled
+            styles.profilePicWrapper
           ]}
-          onPress={isEditing ? handleProfilePictureUpdate : undefined}
-          disabled={saving || !isEditing}
-        >
+        > 
           <View style={styles.profileAvatar}>
             {userData.profile_picture ? (
-              <Image 
-                key={`profile-${userData.profile_picture}-${imageKey}`}
-                source={{
-                  uri: `http://10.0.2.2:5000/uploads/customer-profile/${userData.profile_picture}?v=${imageKey}`,
-                  cache: 'reload'
-                }}
-                style={styles.profileImage}
-                resizeMode="cover"
-                onError={() => {
-                  console.log('Failed to load profile image:', userData.profile_picture);
-                  // Fallback to initials if image fails to load
-                  setUserData(prev => ({ ...prev, profile_picture: '' }));
-                }}
-                onLoadStart={() => console.log('Started loading profile image:', userData.profile_picture)}
-                onLoadEnd={() => console.log('Finished loading profile image:', userData.profile_picture)}
-              />
+            <Image 
+              key={`profile-${userData.profile_picture}-${imageKey}`}
+              source={{
+                uri: userData.profile_picture 
+                    ? `${userData.profile_picture}${userData.profile_picture.includes('http') ? '' : `?v=${imageKey}`}`
+                    : undefined,
+                cache: 'reload'
+              }}
+              style={styles.profileImage}
+              resizeMode="cover"
+              onError={() => setUserData(prev => ({ ...prev, profile_picture: '' }))}
+            />
+            
             ) : (
               <Text style={styles.avatarText}>
                 {getInitials(userData.first_name, userData.last_name)}
@@ -408,28 +403,80 @@ export default function MyProfile() {
                 <ActivityIndicator color="#667eea" size="large" />
               </View>
             )}
-            {isEditing && !saving && (
-              <View style={styles.editIconOverlay}>
-                <Text style={styles.editIcon}>📷</Text>
-              </View>
-            )}
+            {/* Upload icon overlay for updating profile picture*/}
+            <TouchableOpacity
+              style={styles.editIconOverlay}
+              onPress={() => setShowProfileModal(true)}
+              disabled={saving}
+              activeOpacity={0.8}
+            >
+              <Icons.Upload size={18} color="#fff" />
+            </TouchableOpacity>
+      {/* Custom Modal for Profile Picture Update */}
+      <Modal
+        visible={showProfileModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowProfileModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Update Profile Picture</Text>
+            <Text style={styles.modalSubtitle}>Choose a source</Text>
+            <View style={styles.listModalOptions}>
+              <TouchableOpacity
+                style={styles.listModalItem}
+                onPress={() => {
+                  setShowProfileModal(false);
+                  openCamera();
+                }}
+              >
+                <Icons.Camera size={20} color="#667eea" />
+                <Text style={styles.listModalText}>Take Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.listModalItem}
+                onPress={() => {
+                  setShowProfileModal(false);
+                  openGallery();
+                }}
+              >
+                <Icons.Image size={20} color="#667eea"/>
+                <Text style={styles.listModalText}>Choose from Gallery</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.listModalItem, styles.listModalCancel]}
+                onPress={() => setShowProfileModal(false)}
+              >
+                <Text style={[styles.listModalText, styles.listModalCancelText]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-          {isEditing ? (
-            <Text style={[styles.changePictureText, saving && styles.disabledText]}>
-              {saving ? 'Uploading...' : 'Tap to change picture'}
-            </Text>
-          ) : (
-            <Text style={styles.hintText}>
-              Click "Edit Profile" to change picture
-            </Text>
-          )}
-        </TouchableOpacity>
-
+        </View>
+      </Modal>
+          </View>
+        </View>
         <View style={styles.form}>
         {loading ? (
           <ActivityIndicator size="large" color="#96bcff" style={{ marginTop: 50 }} />
         ) : (
           <>
+            {/* Account Settings-like section */}
+            <View style={styles.settingsContainer}>
+              <Text style={styles.settingsHeader}>Account</Text>
+              <TouchableOpacity
+                style={styles.settingsRow}
+                onPress={() => navigation.navigate('ChangePhoneNumber')}
+                activeOpacity={0.7}
+              >
+                <View>
+                  <Text style={styles.settingsLabel}>Phone Number</Text>
+                  <Text style={styles.settingsValue}>{maskPhoneNumber(userData.phone_number)}</Text>
+                </View>
+                <Text style={styles.chevron}>{'›'}</Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Username Field */}
             <View style={styles.infoContainer}>
               <Text style={styles.infoLabel}>Username</Text>
@@ -548,43 +595,57 @@ export default function MyProfile() {
               </View>
             </View>
             
-            {/* Action Buttons */}
-            <View style={styles.buttonContainer}>
-              {isEditing ? (
-                <>
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.cancelButton]}
-                    onPress={handleCancel}
-                    disabled={saving}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={[styles.actionButton, styles.saveButton]}
-                    onPress={handleSave}
-                    disabled={saving}
-                  >
-                    {saving ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.saveButtonText}>Save</Text>
-                    )}
-                  </TouchableOpacity>
-                </>
-              ) : (
+            {/* Action Buttons (only show when editing) */}
+            {isEditing && (
+              <View style={styles.buttonContainer}>
                 <TouchableOpacity 
-                  style={styles.editButton}
-                  onPress={handleEdit}
+                  style={[styles.actionButton, styles.cancelButton]}
+                  onPress={handleCancel}
+                  disabled={saving}
                 >
-                  <Text style={styles.label}>Edit Profile</Text>
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
-              )}
-            </View>
+                
+                <TouchableOpacity 
+                  style={[styles.actionButton, styles.saveButton]}
+                  onPress={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.saveButtonText}>Save Changes</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
           </>
         )}
         </View>
       </ScrollView>
+    {/* Custom App Alert Modal */}
+    <Modal
+      visible={appAlert.visible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setAppAlert({ ...appAlert, visible: false })}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>{appAlert.title}</Text>
+          <Text style={styles.modalSubtitle}>{appAlert.message}</Text>
+          <TouchableOpacity
+            style={[styles.listModalItem, { justifyContent: 'center', marginTop: 18, borderBottomWidth: 0, backgroundColor: '#667eea', borderRadius: 10 }]}
+            onPress={() => {
+              setAppAlert({ ...appAlert, visible: false });
+              if (appAlert.onOk) appAlert.onOk();
+            }}
+          >
+            <Text style={[styles.listModalText, { color: '#fff', fontWeight: '700' }]}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
     </LinearGradient>
   );
 }
@@ -625,7 +686,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     flex: 1,
     textAlign: 'center',
-    marginRight: 28, 
+    marginRight: 0,
+  },
+  headerEditButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 12,
+  },
+  headerEditText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.2,
   },
   profilePicWrapper: {
     alignItems: 'center',
@@ -741,6 +814,50 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 6,
+  },
+  settingsContainer: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ecf0f1',
+    paddingVertical: 6,
+    marginBottom: 12,
+  },
+  settingsHeader: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontWeight: '700',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f3f4',
+  },
+  settingsLabel: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  settingsValue: {
+    fontSize: 15,
+    color: '#2c3e50',
+    fontWeight: '600',
+  },
+  chevron: {
+    fontSize: 22,
+    color: '#bdc3c7',
+    fontWeight: '300',
   },
   label: { fontSize: 15, fontWeight: '700', color: '#ffffff', letterSpacing: 0.2 },
   infoContainer: {
@@ -894,5 +1011,62 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 3,
     elevation: 2,
+  },
+  // ...existing styles...
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 28,
+    width: '80%',
+    alignItems: 'center',
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#667eea',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    marginBottom: 18,
+    textAlign: 'center',
+  },
+  listModalOptions: {
+    width: '100%',
+    marginTop: 10,
+  },
+  listModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f3f4',
+  },
+  listModalText: {
+    fontSize: 16,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  listModalCancel: {
+    borderBottomWidth: 0,
+    marginTop: 2,
+  },
+  listModalCancelText: {
+    color: '#7f8c8d',
+    fontWeight: '600',
   },
 });

@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View, ActivityIndicator, Text } from 'react-native';
+import { View, ActivityIndicator, Text, NativeModules } from 'react-native';
+import { navigationRef } from './RootNavigation';
+import { flushPendingNavigation } from './RootNavigation';
 
 import WelcomeScreen from '../screens/Auth/WelcomeScreen';
 import LoginScreen from '../screens/Auth/LoginScreen';
@@ -11,12 +13,20 @@ import SignupScreen from '../screens/Auth/SignupScreen';
 import ShopDetails from '../screens/ShopScreens/ShopDetails';
 import BookingScreen from '../screens/ShopScreens/BookingScreen';
 import ConfirmationScreen from '../screens/ShopScreens/ConfirmScreen';
+import BookingReceiptScreen from '../screens/ShopScreens/BookingReceiptScreen.tsx';
+import MyBookingReceiptScreen from '../screens/ShopScreens/MyBookingReceiptScreen';
+import PaymentMethodScreen from '../screens/ShopScreens/PaymentMethodScreen';
 import BottomTabs from './BottomTabs';
 import MyProfile from '../screens/MyProfile';
-import EditProfile from '../screens/EditProfile';
 import TransactionHistory from '../screens/TransactionHistory';
 import MessagingScreen from '../screens/Messaging/MessagingScreen';
 import ConvoScreen from '../screens/Messaging/ConvoScreen';
+// @ts-ignore - explicit extension for Metro/TS resolution
+import WalkInBookingDetails from '../screens/WalkInBookingDetails.tsx';
+import PickupBookingDetails from '../screens/PickupBookingDetails';
+import RescheduleBooking from '../screens/RescheduleBooking.tsx';
+// @ts-ignore - sometimes TS resolution lags behind file creation
+import ChangePhoneNumber from '../screens/Auth/ChangePhoneNumber';
 
 export type RootStackParamList = {
   Welcome: undefined;
@@ -44,6 +54,24 @@ export type RootStackParamList = {
     }[];
     shop_id: number;
     shop_name: string;
+    // Optional pickup/delivery defaults
+    pickup_address?: string;
+    delivery_address?: string;
+    delivery_time?: string; // ISO string
+  };
+  PaymentMethod: {
+    booking_type: 'Walk in' | 'Pick up';
+    selectedService: number;
+    serviceName: string;
+    servicePrice: number;
+    selectedDate: string;
+    pickUpFee: number;
+    total: number;
+    shop_id: number;
+    shop_name: string;
+    customer_id: number;
+    paymongoPaymentId?: string;
+    paymentIntentId?: string;
   };
   Confirmation: { 
     booking_type: 'Walk in' | 'Pick up'; 
@@ -55,12 +83,59 @@ export type RootStackParamList = {
     pickUpFee: number;
     total: number;
     shop_id: number;
+    shop_name: string;
     customer_id: number;
+    paymentStatus?: 'paid' | 'pending';
+    paymongoPaymentId?: string;
+    paymentIntentId?: string;
+    // Pickup/delivery fields
+    pickup_address?: string;
+    delivery_address?: string;
+    delivery_time?: string; // ISO string
+  };
+  BookingReceipt: {
+    booking_id: number;
+    receiptNumber: string;
+    booking_type: 'Walk in' | 'Pick up';
+    serviceName: string;
+    servicePrice: number;
+    selectedDate: string;
+    payment: 'gcash' | 'cash' | 'cod';
+    pickUpFee: number;
+    total: number;
+    shop_name: string;
+    customerName: string;
+    customerLastName?: string;
+    paymentStatus?: 'paid' | 'pending';
+    showSuccessModal?: boolean;
+    pickup_address?: string;
+    delivery_address?: string;
+  };
+  MyBookingReceipt: {
+    booking_id: number;
+    receiptNumber: string;
+    booking_type: 'Walk in' | 'Pick up';
+    serviceName: string;
+    servicePrice: number;
+    selectedDate: string;
+    payment: 'gcash' | 'cash' | 'cod';
+    pickUpFee: number;
+    total: number;
+    shop_name: string;
+    customerName: string;
+    customerLastName?: string;
+    paymentStatus?: 'paid' | 'pending';
   };
   MyProfile: undefined;
   EditProfile: undefined; 
-  Transaction: undefined;
+  Transaction: { initialTab?: 'history' | 'refunds' } | undefined;
+  MyBookingScreen: undefined;
+  WalkInBookingDetails: { bookingId: number };
+  PickupBookingDetails: { bookingId: number };
+  RescheduleBooking: { bookingId: number };
+  ChangePhoneNumber: undefined;
 };
+import MyBookingScreen from '../screens/MyBookingScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -103,7 +178,13 @@ const Navigator = () => {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => {
+        flushPendingNavigation();
+        NativeModules.StartupModule?.markReactReady?.();
+      }}
+    >
       <Stack.Navigator initialRouteName={isLoggedIn ? "Home" : "Welcome"}>
         <Stack.Screen
           name="Welcome"
@@ -150,9 +231,24 @@ const Navigator = () => {
           component={BookingScreen} 
           options={{ headerShown: false }}
         />
+        <Stack.Screen
+          name="PaymentMethod"
+          component={PaymentMethodScreen}
+          options={{ headerShown: false }}
+        />
         <Stack.Screen 
           name="Confirmation" 
           component={ConfirmationScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="BookingReceipt" 
+          component={BookingReceiptScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen 
+          name="MyBookingReceipt" 
+          component={MyBookingReceiptScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen 
@@ -160,14 +256,34 @@ const Navigator = () => {
           component={MyProfile} 
           options={{ headerShown: false }}
         />
-        <Stack.Screen 
-          name="EditProfile" 
-          component={EditProfile} 
-          options={{ headerShown: false }}
-        />
         <Stack.Screen
           name="Transaction"
           component={TransactionHistory}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="MyBookingScreen"
+          component={MyBookingScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="WalkInBookingDetails"
+          component={WalkInBookingDetails}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PickupBookingDetails"
+          component={PickupBookingDetails}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="RescheduleBooking"
+          component={RescheduleBooking}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ChangePhoneNumber"
+          component={ChangePhoneNumber}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>

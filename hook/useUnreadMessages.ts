@@ -1,102 +1,189 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import socketService from '../services/socketService';
 import { Message } from './useMessaging';
+import { mergeUnreadMessagesByConversation, removeUnreadMessagesForConversation } from '../utils/unreadConversationState';
 
 const useUnreadMessages = (userId: string, userType: 'customer' | 'admin') => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState<Message[]>([]);
 
-  // Load unread count from storage
-  useEffect(() => {
-    const loadUnreadCount = async () => {
-      try {
-        const savedCount = await AsyncStorage.getItem(`unreadMessages_${userId}`);
-        if (savedCount) {
-          setUnreadCount(parseInt(savedCount, 10));
-        }
-      } catch (error) {
-        console.log('Error loading unread count:', error);
-      }
-    };
+  const storageKey = `unreadMessages_${userId}`;
+  const storageDataKey = `unreadMessagesData_${userId}`;
 
-    if (userId) {
-      loadUnreadCount();
-    }
-  }, [userId]);
-
-  // Save unread count to storage
-  const saveUnreadCount = async (count: number) => {
+  const saveUnreadState = useCallback(async (messages: Message[], count: number) => {
     try {
-      await AsyncStorage.setItem(`unreadMessages_${userId}`, count.toString());
+      await AsyncStorage.setItem(storageKey, count.toString());
+      await AsyncStorage.setItem(storageDataKey, JSON.stringify(messages));
     } catch (error) {
-      console.log('Error saving unread count:', error);
+      console.log('Error saving unread state:', error);
     }
-  };
+  }, [storageKey, storageDataKey]);
 
-  // Listen for new messages when not in messaging screen
+  const loadUnreadState = useCallback(async () => {
+    try {
+      const savedCount = await AsyncStorage.getItem(storageKey);
+      const savedMessages = await AsyncStorage.getItem(storageDataKey);
+
+      let parsedMessages: Message[] = [];
+      if (savedMessages) {
+        try {
+          parsedMessages = JSON.parse(savedMessages) as Message[];
+        } catch {
+          parsedMessages = [];
+        }
+      }
+
+      const parsedCount = Number.parseInt(savedCount || '0', 10) || 0;
+      const hasValidUnreadState = parsedMessages.length > 0 || parsedCount > 0;
+
+      if (!hasValidUnreadState) {
+        setUnreadCount(0);
+        setUnreadMessages([]);
+        await saveUnreadState([], 0);
+        return;
+      }
+
+      setUnreadCount(parsedMessages.length > 0 ? parsedMessages.length : parsedCount);
+      setUnreadMessages(parsedMessages);
+
+      if (parsedMessages.length === 0 && parsedCount > 0) {
+        await saveUnreadState([], 0);
+        setUnreadCount(0);
+      }
+    } catch (err) {
+      console.log('Error loading unread state:', err);
+    }
+  }, [saveUnreadState, storageKey, storageDataKey]);
+
+  useEffect(() => {
+    if (userId) {
+      void loadUnreadState();
+    }
+  }, [userId, loadUnreadState]);
+
   useEffect(() => {
     if (!userId) return;
 
-    // Connect to socket
     socketService.connect(userId, userType);
 
-    // Listen for incoming messages
-    socketService.onReceiveMessage((newMessage: Message) => {
-      console.log('📩 New message received for unread tracking:', newMessage);
-      
+    const handleIncomingMessage = (newMessage: Message) => {
       // Only count messages that are not from the current user
       if (newMessage.sender_id !== userId) {
         setUnreadMessages(prev => {
-          // Check if message already exists
-          const exists = prev.some(msg => 
-            msg.id === newMessage.id || 
-            (msg.message_text === newMessage.message_text && 
-             msg.sender_id === newMessage.sender_id &&
-             Math.abs(new Date(msg.created_at || '').getTime() - new Date(newMessage.created_at || '').getTime()) < 1000)
-          );
-          
-          if (!exists) {
-            const newUnreadMessages = [...prev, newMessage];
-            const newCount = newUnreadMessages.length;
+          const nextUnreadMessages = mergeUnreadMessagesByConversation(prev, newMessage);
+          const newCount = nextUnreadMessages.length;
+
+          if (newCount !== prev.length) {
             setUnreadCount(newCount);
-            saveUnreadCount(newCount);
-            return newUnreadMessages;
+            void saveUnreadState(nextUnreadMessages, newCount);
           }
-          
-          return prev;
+
+          return nextUnreadMessages;
         });
       }
-    });
-
-    // Cleanup
-    return () => {
-      socketService.offReceiveMessage();
     };
-  }, [userId, userType]);
 
-  // Clear unread messages
-  const clearUnreadMessages = async () => {
+    socketService.onReceiveMessage(handleIncomingMessage);
+
+    return () => {
+      socketService.offReceiveMessage(handleIncomingMessage);
+    };
+  }, [userId, userType, saveUnreadState]);
+
+  const clearUnreadMessages = useCallback(async () => {
     setUnreadCount(0);
     setUnreadMessages([]);
-    await saveUnreadCount(0);
-  };
+    await saveUnreadState([], 0);
+  }, [saveUnreadState]);
 
-  // Mark specific message as read
-  const markMessageAsRead = async (messageId: number | string) => {
+  const markConversationAsRead = useCallback(async (message: Partial<Message>) => {
+    let nextUnreadMessages: Message[] = [];
+
     setUnreadMessages(prev => {
-      const filtered = prev.filter(msg => msg.id !== messageId);
-      const newCount = filtered.length;
+      nextUnreadMessages = removeUnreadMessagesForConversation(prev, message);
+      const newCount = nextUnreadMessages.length;
       setUnreadCount(newCount);
-      saveUnreadCount(newCount);
-      return filtered;
+      return nextUnreadMessages;
     });
-  };
+
+    await saveUnreadState(nextUnreadMessages, nextUnreadMessages.length);
+  }, [saveUnreadState]);
+
+  const clearConversationUnreadState = useCallback(async (message: Partial<Message>) => {
+    let nextUnreadMessages: Message[] = [];
+
+    setUnreadMessages(prev => {
+      nextUnreadMessages = removeUnreadMessagesForConversation(prev, message);
+      const newCount = nextUnreadMessages.length;
+      setUnreadCount(newCount);
+      return nextUnreadMessages;
+    });
+
+    await saveUnreadState(nextUnreadMessages, nextUnreadMessages.length);
+  }, [saveUnreadState]);
+
+  const consumeLastReadConversationMarker = useCallback(async () => {
+    if (!userId) return null;
+
+    const markerKey = `lastReadConversation_${userId}`;
+    const markerValue = await AsyncStorage.getItem(markerKey);
+
+    if (!markerValue) return null;
+
+    let parsedMarker: {
+      shopId?: string;
+      receiverId?: string;
+      receiverType?: 'customer' | 'admin';
+    } | null = null;
+
+    try {
+      const marker = JSON.parse(markerValue) as {
+        shopId?: string;
+        receiverId?: string;
+        receiverType?: 'customer' | 'admin';
+      };
+      parsedMarker = marker;
+
+      if (marker.shopId && marker.receiverId && marker.receiverType) {
+        await clearConversationUnreadState({
+          sender_id: marker.receiverId,
+          sender_type: marker.receiverType,
+          receiver_id: userId,
+          receiver_type: userType,
+          shop_id: marker.shopId,
+        });
+      }
+    } catch (error) {
+      console.log('Error consuming read marker:', error);
+    } finally {
+      await AsyncStorage.removeItem(markerKey);
+    }
+
+    return parsedMarker;
+  }, [clearConversationUnreadState, userId, userType]);
+
+  const markMessageAsRead = useCallback(async (messageId: number | string) => {
+    let nextUnreadMessages: Message[] = [];
+
+    setUnreadMessages(prev => {
+      nextUnreadMessages = prev.filter(msg => msg.id !== messageId);
+      const newCount = nextUnreadMessages.length;
+      setUnreadCount(newCount);
+      return nextUnreadMessages;
+    });
+
+    await saveUnreadState(nextUnreadMessages, nextUnreadMessages.length);
+  }, [saveUnreadState]);
 
   return {
     unreadCount,
     unreadMessages,
     clearUnreadMessages,
+    refreshUnreadMessages: loadUnreadState,
+    markConversationAsRead,
+    clearConversationUnreadState,
+    consumeLastReadConversationMarker,
     markMessageAsRead,
   };
 };

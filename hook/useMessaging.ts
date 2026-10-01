@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import { api, API_CONFIG } from '../config/api';
 import socketService from '../services/socketService';
 
 export interface Message {
@@ -93,10 +93,60 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
         });
       });
 
+      const handleIncomingMessage = (newMessage: Message) => {
+        console.log('📩 Received message via socket:', newMessage);
+        
+        // Filter messages to only show those that belong to the current conversation
+        if (currentConversation) {
+          const isMessageForCurrentConversation = (
+            newMessage.shop_id === currentConversation.shopId &&
+            (
+              // Message sent by current user
+              (newMessage.sender_id === currentConversation.senderId) ||
+              // Message received by current user from the current conversation partner
+              (newMessage.sender_id === currentConversation.receiverId && 
+               (newMessage.receiver_id === currentConversation.senderId || newMessage.receiver_id === userId))
+            )
+          );
+
+          if (!isMessageForCurrentConversation) {
+            console.log('🚫 Message not for current conversation, ignoring:', {
+              messageShopId: newMessage.shop_id,
+              messageSenderId: newMessage.sender_id,
+              messageReceiverId: newMessage.receiver_id,
+              currentShopId: currentConversation.shopId,
+              currentSenderId: currentConversation.senderId,
+              currentReceiverId: currentConversation.receiverId
+            });
+            return;
+          }
+        }
+        
+        setMessages(prev => {
+          // Check if message already exists to prevent duplicates
+          const exists = prev.some(msg => 
+            msg.message_text === newMessage.message_text && 
+            msg.sender_id === newMessage.sender_id &&
+            Math.abs(new Date(msg.created_at || '').getTime() - new Date(newMessage.created_at || '').getTime()) < 1000
+          );
+          
+          if (exists) {
+            console.log('🚫 Duplicate message detected, ignoring');
+            return prev;
+          }
+          
+          console.log('✅ Adding new message to state');
+          return [...prev, newMessage];
+        });
+      };
+
+      // Listen for incoming messages
+      socketService.onReceiveMessage(handleIncomingMessage);
+
       // Cleanup function
       return () => {
         console.log('🧹 Cleaning up socket listeners');
-        socketService.offReceiveMessage();
+        socketService.offReceiveMessage(handleIncomingMessage);
         setCurrentConversation(null);
       };
     }
@@ -128,7 +178,7 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
 
       // Also save to database via API (this ensures message is always saved)
       console.log('💾 Saving message to database');
-      const response = await axios.post('http://10.0.2.2:5000/api/messages', messageData);
+  const response = await api.post('/messages', messageData);
       console.log('✅ Message saved to database:', response.status);
       
       // If socket wasn't connected, add message manually to local state
@@ -161,14 +211,14 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
       });
       
       console.log('📡 Loading conversation with API call:', {
-        url: `http://10.0.2.2:5000/api/messages/conversation/${customerId}/${adminId}/${shopId}`,
+        url: `${API_CONFIG.BASE_URL}/messages/conversation/${customerId}/${adminId}/${shopId}`,
         customerId,
         adminId,
         shopId
       });
       
-      const response = await axios.get(
-        `http://10.0.2.2:5000/api/messages/conversation/${customerId}/${adminId}/${shopId}`
+      const response = await api.get(
+        `/messages/conversation/${customerId}/${adminId}/${shopId}`
       );
       
       console.log('📨 Conversation API response:', {

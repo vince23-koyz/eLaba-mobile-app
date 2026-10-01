@@ -1,13 +1,15 @@
-import { StyleSheet, Text, View, FlatList, Image, TouchableOpacity } from 'react-native'
-import React, { useState, useEffect } from 'react'
+import { StyleSheet, Text, View, FlatList, Image, TouchableOpacity, Platform, Dimensions, StatusBar, SafeAreaView } from 'react-native'
+import React, { useState, useEffect, useRef } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/Navigator';
 import useShops from '../../hook/useShops';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import socketService from '../../services/socketService';
+import { api, API_ENDPOINTS, API_CONFIG } from '../../config/api';
+import { resolveEffectiveUnreadState } from '../../utils/messageReadState';
+import useUnreadMessages from '../../hook/useUnreadMessages.ts';
 
 // Basic shop interface
 interface Shop {
@@ -18,7 +20,7 @@ interface Shop {
   owner_name?: string;
   operation_hours?: string;
   admin_id?: number;
-  logo?: string; // Add logo property
+  logo?: string;
 }
 
 // Message interface
@@ -29,6 +31,7 @@ interface Message {
   sender_id: string;
   receiver_type: 'customer' | 'admin';
   receiver_id: string;
+  is_read?: number;
 }
 
 // Interface for shops with the latest message information
@@ -49,59 +52,34 @@ export default function MessagingScreen() {
   const [shopsWithMessages, setShopsWithMessages] = useState<ShopWithLastMessage[]>([]);
   const [filteredShops, setFilteredShops] = useState<ShopWithLastMessage[]>([]);
   const [lastMessageUpdate, setLastMessageUpdate] = useState<number>(Date.now());
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [clearingShopId, setClearingShopId] = useState<string | null>(null);
+  const readStateOverridesRef = useRef<Record<string, { hasUnreadMessages: boolean; unreadCount: number }>>({});
+  const { consumeLastReadConversationMarker, clearConversationUnreadState } = useUnreadMessages(userId || '', userType);
   
-  // User profile data state
-  const [userData, setUserData] = useState({
-    customer_id: '',
-    first_name: '',
-    last_name: '',
-    username: '',
-    profile_picture: ''
-  });
+  // Persisted local overrides to prevent UI flashing unread state
+  const persistReadOverrides = async (uid?: string) => {
+    try {
+      if (!uid) return;
+      await AsyncStorage.setItem(`readOverrides_${uid}`, JSON.stringify(readStateOverridesRef.current || {}));
+    } catch (err) {
+      console.log('Error persisting read overrides:', err);
+    }
+  };
+
+  const loadReadOverrides = async (uid?: string) => {
+    try {
+      if (!uid) return;
+      const raw = await AsyncStorage.getItem(`readOverrides_${uid}`);
+      if (raw) {
+        readStateOverridesRef.current = JSON.parse(raw) || {};
+      }
+    } catch (err) {
+      console.log('Error loading read overrides:', err);
+    }
+  };
   
   const { shops, loading, refresh: refreshShops } = useShops();
-
-  // Function to get initials from customer first and last name
-  const getInitials = (firstName: string | null, lastName: string | null): string => {
-    if (!firstName && !lastName) return 'NN'; // Default to 'NN' for No Name
-    
-    const firstInitial = firstName ? firstName.charAt(0).toUpperCase() : '';
-    const lastInitial = lastName ? lastName.charAt(0).toUpperCase() : '';
-    
-    if (firstInitial && lastInitial) {
-      return firstInitial + lastInitial;
-    } else if (firstInitial) {
-      return firstInitial;
-    } else if (lastInitial) {
-      return lastInitial;
-    }
-    
-    return 'NN';
-  };
-
-  // Fetch user profile data
-  const fetchUserData = async () => {
-    try {
-      const customerId = await AsyncStorage.getItem('customerId');
-      
-      if (customerId) {
-        const response = await axios.get(`http://10.0.2.2:5000/api/customers/${customerId}`);
-        
-        if (response.data) {
-          console.log('Fetched user data for messaging:', response.data);
-          setUserData({
-            customer_id: response.data.customer_id || '',
-            first_name: response.data.first_name || '',
-            last_name: response.data.last_name || '',
-            username: response.data.username || '',
-            profile_picture: response.data.profile_picture || ''
-          });
-        }
-      }
-    } catch (error: any) {
-      console.error('Error fetching user data for messaging:', error);
-    }
-  };
 
   useEffect(() => {
     const initializeUser = async () => {
@@ -114,8 +92,8 @@ export default function MessagingScreen() {
           setUserId(customerId);
           setUserType('customer');
           console.log('✅ Initialized user:', { customerId, customerName });
-          // Fetch user profile data
-          await fetchUserData();
+          // Load any persisted read overrides so UI won't show unread flashes
+          await loadReadOverrides(customerId);
         } else {
           console.log('❌ No customer ID found in AsyncStorage');
           // Default values for testing
@@ -136,71 +114,62 @@ export default function MessagingScreen() {
   // Function to get only shops that have messages with the user
   const getShopsWithMessages = async (customerUserId: string) => {
     if (!customerUserId || shops.length === 0) return;
-
+    setMessagesLoading(true);
     try {
       const shopsWithConversations: ShopWithLastMessage[] = [];
-
       for (const shop of shops) {
         try {
-          const response = await axios.get(
-            `http://10.0.2.2:5000/api/messages/conversation/${customerUserId}/${shop.admin_id || '1'}/${shop.shop_id}`
-          );
-          
+          const response = await api.get(`/messages/conversation/${customerUserId}/${shop.admin_id || '1'}/${shop.shop_id}`);
           const messages: Message[] = response.data || [];
-          
-          // Only include shops that have actual messages
           if (messages.length > 0) {
             const latestMessage = messages[messages.length - 1];
-            
-            // Check for unread messages (messages from admin that came after customer's last message)
-            const customerMessages = messages.filter((msg: Message) => msg.sender_type === 'customer');
-            const adminMessages = messages.filter((msg: Message) => msg.sender_type === 'admin');
-            
-            let hasUnreadMessages = false;
-            let unreadCount = 0;
-            
-            if (adminMessages.length > 0) {
-              const lastCustomerMessageTime = customerMessages.length > 0 
-                ? new Date(customerMessages[customerMessages.length - 1].created_at).getTime()
-                : 0;
-              
-              // Count admin messages that came after customer's last message
-              unreadCount = adminMessages.filter((msg: Message) => 
-                new Date(msg.created_at).getTime() > lastCustomerMessageTime
-              ).length;
-              
-              hasUnreadMessages = unreadCount > 0;
-            }
-            
+            const unreadForCustomer = messages.filter((msg: Message) => 
+              msg.receiver_type === 'customer' &&
+              msg.receiver_id?.toString() === customerUserId.toString() &&
+              Number(msg.is_read) === 0
+            );
+            const unreadCount = unreadForCustomer.length;
+            const hasUnreadMessages = unreadCount > 0;
+            const shopIdKey = shop.shop_id?.toString();
+            const override = shopIdKey ? readStateOverridesRef.current[shopIdKey] : undefined;
+            const { hasUnreadMessages: effectiveUnreadMessages, unreadCount: effectiveUnreadCount } = resolveEffectiveUnreadState({
+              serverHasUnreadMessages: hasUnreadMessages,
+              serverUnreadCount: unreadCount,
+              override,
+            });
+            const isLastMessageFromCurrentUser =
+              latestMessage.sender_type === 'customer' &&
+              latestMessage.sender_id?.toString() === customerUserId.toString();
+            const previewText = isLastMessageFromCurrentUser
+              ? `You: ${latestMessage.message_text}`
+              : latestMessage.message_text;
+
             shopsWithConversations.push({
               ...shop,
-              lastMessage: latestMessage.message_text,
+              lastMessage: previewText,
               lastMessageTime: formatTime(latestMessage.created_at),
-              lastMessageTimestamp: new Date(latestMessage.created_at).getTime(), // Add timestamp
-              hasUnreadMessages,
-              unreadCount,
+              lastMessageTimestamp: new Date(latestMessage.created_at).getTime(),
+              hasUnreadMessages: effectiveUnreadMessages,
+              unreadCount: effectiveUnreadCount,
             });
           }
         } catch (error) {
           console.error(`Error fetching messages for shop ${shop.shop_id}:`, error);
-          // Skip shops with errors
         }
       }
-
-      // Sort by latest message timestamp (most recent first)
       shopsWithConversations.sort((a, b) => {
         if (!a.lastMessageTimestamp && !b.lastMessageTimestamp) return 0;
         if (!a.lastMessageTimestamp) return 1;
         if (!b.lastMessageTimestamp) return -1;
-        
-        return b.lastMessageTimestamp - a.lastMessageTimestamp; // Most recent first
+        return b.lastMessageTimestamp - a.lastMessageTimestamp;
       });
-
       setShopsWithMessages(shopsWithConversations);
       setFilteredShops(shopsWithConversations);
     } catch (error) {
       console.error('Error fetching shops with messages:', error);
       setShopsWithMessages([]);
+    } finally {
+      setMessagesLoading(false);
     }
   };
 
@@ -250,6 +219,14 @@ export default function MessagingScreen() {
         
         if (isForThisCustomer) {
           console.log('✅ [CUSTOMER] Message is for this customer, refreshing shop conversations');
+
+          const shopIdKey = newMessage?.shop_id?.toString();
+          if (shopIdKey && readStateOverridesRef.current[shopIdKey]) {
+            delete readStateOverridesRef.current[shopIdKey];
+            // Persist change so UI reflects actual incoming unread state
+            void persistReadOverrides(userId);
+          }
+
           // Immediately refresh the shop conversations for instant updates
           if (shops.length > 0) {
             getShopsWithMessages(userId);
@@ -266,7 +243,7 @@ export default function MessagingScreen() {
       // Cleanup function
       return () => {
         console.log('🧹 [CUSTOMER] Cleaning up MessagingScreen message listener');
-        socketService.offReceiveMessage();
+        socketService.offReceiveMessage(handleNewMessage);
       };
     }
   }, [userId, userType, shops]);
@@ -283,21 +260,98 @@ export default function MessagingScreen() {
   useEffect(() => {
     if (isFocused && userId && shops.length > 0) {
       console.log('🔄 [CUSTOMER] Screen focused - refreshing conversations to show latest messages');
-      getShopsWithMessages(userId);
-      // Also refresh user data to get latest profile picture
-      fetchUserData();
-    }
-  }, [isFocused, userId, shops]);
+      const refreshFocusedConversations = async () => {
+        const marker = await consumeLastReadConversationMarker();
+        const markerShopId = marker?.shopId?.toString();
 
-  const handleProfile = () => {
-    navigation.navigate('MyProfile');
+        if (markerShopId) {
+          clearUnreadForShop(markerShopId);
+        }
+
+        await getShopsWithMessages(userId);
+
+        if (markerShopId) {
+          clearUnreadForShop(markerShopId);
+        }
+
+        if (clearingShopId) {
+          clearUnreadForShop(clearingShopId);
+          setClearingShopId(null);
+        }
+
+      };
+
+      void refreshFocusedConversations();
+    }
+  }, [isFocused, userId, shops, clearingShopId, consumeLastReadConversationMarker]);
+
+  const clearUnreadForShop = (shopId?: string | number | null) => {
+    const targetShopId = shopId?.toString();
+    if (!targetShopId) return;
+
+    readStateOverridesRef.current = {
+      ...readStateOverridesRef.current,
+      [targetShopId]: { hasUnreadMessages: false, unreadCount: 0 },
+    };
+
+    setShopsWithMessages(prev => prev.map(s => 
+      s.shop_id?.toString() === targetShopId ? { ...s, hasUnreadMessages: false, unreadCount: 0 } : s
+    ));
+    setFilteredShops(prev => {
+      if (activeFilter === 'Unread') {
+        return prev.filter(s => s.shop_id?.toString() !== targetShopId);
+      }
+      return prev.map(s => 
+        s.shop_id?.toString() === targetShopId ? { ...s, hasUnreadMessages: false, unreadCount: 0 } : s
+      );
+    });
+    // Persist override so subsequent fetches don't flip the state back to unread
+    void persistReadOverrides(userId);
   };
 
-  const handleChatPress = (shop: ShopWithLastMessage) => {
+  const markConversationAsRead = async (shop: ShopWithLastMessage) => {
+    if (!userId || !shop.admin_id || !shop.shop_id) return;
+
+    const shopId = shop.shop_id.toString();
+    clearUnreadForShop(shopId);
+
+    try {
+      await api.put(API_ENDPOINTS.MESSAGES.MARK_READ, {
+        senderId: shop.admin_id.toString(),
+        receiverId: userId,
+        shopId,
+        senderType: 'admin',
+        receiverType: 'customer',
+      });
+
+      await getShopsWithMessages(userId);
+      clearUnreadForShop(shopId);
+    } catch (e) {
+      console.log('mark-read (list) failed:', (e as any)?.response?.data || (e as any)?.message || e);
+    }
+  };
+
+  const handleChatPress = async (shop: ShopWithLastMessage) => {
+    setClearingShopId(shop.shop_id?.toString() || null);
+    clearUnreadForShop(shop.shop_id);
+
+    if (userId && shop.shop_id && shop.admin_id) {
+      await clearConversationUnreadState({
+        sender_id: shop.admin_id.toString(),
+        sender_type: 'admin',
+        receiver_id: userId,
+        receiver_type: 'customer',
+        shop_id: shop.shop_id.toString(),
+      });
+    }
+
+    await markConversationAsRead(shop);
+
     // Use shop logo as avatar if available, otherwise use creative icon flag
-    const avatarSource = shop.logo 
-      ? { uri: `http://10.0.2.2:5000${shop.logo}` }
-      : null; // Pass null to trigger creative icon in ConvoScreen
+    const logoUri = shop.logo
+      ? (shop.logo.startsWith('http') ? shop.logo : `${API_CONFIG.BASE_ORIGIN}${shop.logo}`)
+      : null;
+    const avatarSource = logoUri ? { uri: logoUri } : null; // Pass null to trigger creative icon in ConvoScreen
     
     navigation.navigate('Convo', { 
       shopName: shop.name,
@@ -373,64 +427,30 @@ export default function MessagingScreen() {
 
   const renderItem = ({ item }: { item: ShopWithLastMessage }) => (
     <TouchableOpacity 
-      style={[
-        styles.chatItem, 
-        item.hasUnreadMessages && styles.unreadChatItem // Highlight unread conversations
-      ]} 
+      style={[styles.chatItem, item.hasUnreadMessages && styles.unreadChatItem]}
       onPress={() => handleChatPress(item)}
     >
-      {/* Shop Avatar - Show image or creative icon */}
-      <View style={styles.avatarContainer}>
+      <View style={[styles.avatarContainer, item.hasUnreadMessages && styles.unreadAvatarContainer]}>
         {item.logo ? (
           <Image 
-            source={{ uri: `http://10.0.2.2:5000${item.logo}` }} 
+            source={{ uri: item.logo.startsWith('http') ? item.logo : `${API_CONFIG.BASE_ORIGIN}${item.logo}` }} 
             style={styles.avatar} 
           />
         ) : (
-          <View style={styles.creativeAvatarContainer}>
-            {/* Laundry Machine Icon */}
-            <View style={styles.washingMachine}>
-              <View style={styles.machineBody} />
-              <View style={styles.machineWindow} />
-              <View style={styles.machineControl1} />
-              <View style={styles.machineControl2} />
-            </View>
-            {/* Floating Bubbles */}
-            <View style={styles.bubble1} />
-            <View style={styles.bubble2} />
-            <View style={styles.bubble3} />
+          <View style={[styles.minimalAvatarInitials, item.hasUnreadMessages && styles.unreadAvatarInitials]}>
+            <Text style={styles.minimalAvatarText}>{item.name?.charAt(0) || '?'}</Text>
           </View>
         )}
       </View>
       <View style={styles.chatInfo}>
-        <Text style={[
-          styles.name,
-          item.hasUnreadMessages && styles.unreadName // Bold name for unread
-        ]}>
-          {item.name}
-        </Text>
-        <Text 
-          style={[
-            styles.lastMessage,
-            item.hasUnreadMessages && styles.unreadLastMessage // Bold message for unread
-          ]} 
-          numberOfLines={1}
-        >
-          {item.lastMessage}
-        </Text>
+        <Text style={[styles.name, item.hasUnreadMessages && styles.unreadName]} numberOfLines={1}>{item.name}</Text>
+        <Text style={[styles.lastMessage, item.hasUnreadMessages && styles.unreadLastMessage]} numberOfLines={1}>{item.lastMessage}</Text>
       </View>
       <View style={styles.statusContainer}>
-        <Text style={[
-          styles.time,
-          item.hasUnreadMessages && styles.unreadTime // Bold time for unread
-        ]}>
-          {item.lastMessageTime}
-        </Text>
-        {item.hasUnreadMessages && item.unreadCount && item.unreadCount > 0 && (
+        <Text style={[styles.time, item.hasUnreadMessages && styles.unreadTime]}>{item.lastMessageTime}</Text>
+        {item.hasUnreadMessages && (
           <View style={styles.unreadBadge}>
-            <Text style={styles.unreadBadgeText}>
-              {item.unreadCount > 99 ? '99+' : item.unreadCount}
-            </Text>
+            <Text style={styles.unreadBadgeText}>{item.unreadCount && item.unreadCount > 9 ? '9+' : item.unreadCount || 1}</Text>
           </View>
         )}
       </View>
@@ -438,46 +458,16 @@ export default function MessagingScreen() {
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
       <LinearGradient
         colors={['#91e2d9', '#96bcff']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={[styles.headerContainer, { elevation: 4, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 }]}
       >
-        {/* Left side (Back) */}
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Image source={require('../../assets/img/icon/back.png')} style={styles.backIcon} />
-        </TouchableOpacity>
-
-        {/* Center Title */}
-        <Text style={styles.headerTitle}>Messaging</Text>
-
-        {/* Right side (Profile) */}
-        <TouchableOpacity onPress={handleProfile} style={styles.profileButton}>
-          <View style={styles.profileIconContainer}>
-            {userData.profile_picture ? (
-              <Image 
-                source={{
-                  uri: `http://10.0.2.2:5000/uploads/customer-profile/${userData.profile_picture}`,
-                  cache: 'reload'
-                }}
-                style={styles.profileIcon}
-                onError={() => {
-                  console.log('Failed to load profile image in messaging:', userData.profile_picture);
-                  // Fallback to initials if image fails to load
-                  setUserData(prev => ({ ...prev, profile_picture: '' }));
-                }}
-              />
-            ) : (
-              <View style={styles.profileInitialsContainer}>
-                <Text style={styles.profileInitials}>
-                  {getInitials(userData.first_name, userData.last_name)}
-                </Text>
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
+        <View style={styles.headerSpacer} />
+        <Text style={styles.headerTitle}>Messages</Text>
+        <View style={styles.headerSpacer} />
       </LinearGradient>
 
       <View style={styles.filterContainer}>
@@ -487,42 +477,58 @@ export default function MessagingScreen() {
       </View>
 
       <FlatList
-        data={filteredShops}
-        keyExtractor={item => item.shop_id.toString()}
-        renderItem={renderItem}
+        data={messagesLoading ? Array.from({ length: 4 }, (_, i) => ({ shop_id: i + 1, name: '', lastMessage: '', lastMessageTime: '', hasUnreadMessages: false })) : filteredShops}
+        keyExtractor={(item) => item.shop_id.toString()}
+        renderItem={({ item }) =>
+          messagesLoading ? (
+            <View style={styles.chatSkeletonContainer}>
+              <View style={styles.chatSkeletonAvatar} />
+              <View style={styles.chatSkeletonTextGroup}>
+                <View style={styles.chatSkeletonLine} />
+                <View style={[styles.chatSkeletonLine, styles.chatSkeletonLineShort]} />
+              </View>
+            </View>
+          ) : (
+            renderItem({ item: item as ShopWithLastMessage })
+          )
+        }
         contentContainerStyle={{ padding: 16 }}
-        refreshing={loading}
-        onRefresh={() => {
-          refreshShops();
-          if (userId) getShopsWithMessages(userId);
+        refreshing={loading || messagesLoading}
+        onRefresh={async () => {
+          await refreshShops();
+          if (userId) await getShopsWithMessages(userId);
         }}
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              {activeFilter === 'Recent' ? 'No recent conversations' : 
-               activeFilter === 'Unread' ? 'No unread messages' : 
-               'No conversations yet'}
-            </Text>
-            <Text style={styles.emptySubText}>
-              {activeFilter === 'All Chats' ? 
-                'Start a conversation by visiting a shop and tapping the chat icon' :
-                'Try a different filter or start a new conversation'}
-            </Text>
-          </View>
+          messagesLoading ? null : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                {activeFilter === 'Recent' ? 'No recent conversations' : 
+                 activeFilter === 'Unread' ? 'No unread messages' : 
+                 'No conversations yet'}
+              </Text>
+              <Text style={styles.emptySubText}>
+                {activeFilter === 'All Chats' ? 
+                  'Start a conversation by visiting a shop and tapping the chat icon' :
+                  'Try a different filter or start a new conversation'}
+              </Text>
+            </View>
+          )
         }
       />
-    </View>
+  </SafeAreaView>
   );
 }
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const ANDROID_STATUSBAR = Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0;
 const styles = StyleSheet.create({
   headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 40,
-    paddingBottom: 14,
-    paddingHorizontal: 15,
+    paddingTop: Platform.OS === 'android' ? ANDROID_STATUSBAR + 6 : 24,
+    paddingBottom: SCREEN_WIDTH < 370 ? 4 : 8,
+    paddingHorizontal: SCREEN_WIDTH < 370 ? 8 : 15,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
@@ -538,51 +544,15 @@ const styles = StyleSheet.create({
     tintColor: '#fff',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: SCREEN_WIDTH < 370 ? 16 : 20,
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',
     flex: 1, 
   },
-  profileButton: {
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  profileIconContainer: {
+  headerSpacer: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  profileIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    resizeMode: 'cover',
-  },
-  profileInitialsContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#667eea',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileInitials: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#ffffff',
-    textAlign: 'center',
-    letterSpacing: 0.5,
   },
   filterContainer: {
     flexDirection: 'row',
@@ -600,20 +570,9 @@ const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
   },
   activeFilterButton: {
     backgroundColor: '#1ca7ec',
-    elevation: 4,
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
   },
   inactiveFilterButton: {
     backgroundColor: '#f8f9fa',
@@ -664,149 +623,124 @@ const styles = StyleSheet.create({
   chatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#f4f4f4',
+    backgroundColor: '#fff',
+    minHeight: 56,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    marginBottom: 6,
   },
   unreadChatItem: {
-    backgroundColor: '#f0f8ff', // Light blue background for unread conversations
-    borderLeftWidth: 4,
-    borderLeftColor: '#1ca7ec', // Blue accent border
+    backgroundColor: '#f2f9ff',
+    borderWidth: 1,
+    borderColor: '#cce9ff',
   },
   avatarContainer: {
-    width: 48,
-    height: 48,
-    marginRight: 14,
+    width: 38,
+    height: 38,
+    marginRight: 10,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  unreadAvatarContainer: {
+    borderWidth: 2,
+    borderColor: '#1ca7ec',
+    borderRadius: 19,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#eee',
   },
-  // Creative Avatar Styles for MessagingScreen
-  creativeAvatarContainer: {
-    width: 48,
-    height: 48,
-    backgroundColor: '#4A90E2',
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  washingMachine: {
-    width: 24,
-    height: 24,
-    position: 'relative',
+  minimalAvatarInitials: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#e0e0e0',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  machineBody: {
-    width: 24,
-    height: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 5,
-    position: 'absolute',
-    shadowColor: 'rgba(0, 0, 0, 0.2)',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 1,
-    shadowRadius: 2,
-    elevation: 2,
+  unreadAvatarInitials: {
+    backgroundColor: '#dff4ff',
+    borderWidth: 2,
+    borderColor: '#1ca7ec',
   },
-  machineWindow: {
-    width: 14,
-    height: 14,
-    backgroundColor: 'rgba(74, 144, 226, 0.3)',
-    borderRadius: 7,
-    position: 'absolute',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.8)',
+  minimalAvatarText: {
+    fontSize: 16,
+    color: '#888',
+    fontWeight: 'bold',
   },
-  machineControl1: {
-    width: 2,
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 1,
-    position: 'absolute',
-    top: -8,
-    left: -5,
+  minimalUnreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#1ca7ec',
+    alignSelf: 'flex-end',
+    marginTop: 4,
   },
-  machineControl2: {
-    width: 2,
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 1,
-    position: 'absolute',
-    top: -8,
-    right: -5,
+  chatSkeletonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f4f4f4',
+    backgroundColor: '#fff',
   },
-  bubble1: {
-    width: 4,
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-    borderRadius: 2,
-    position: 'absolute',
-    top: 10,
-    left: 10,
+  chatSkeletonAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#e8e8ef',
+    marginRight: 10,
   },
-  bubble2: {
-    width: 3,
-    height: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-    borderRadius: 1.5,
-    position: 'absolute',
-    top: 6,
-    right: 8,
+  chatSkeletonTextGroup: {
+    flex: 1,
+    justifyContent: 'center',
   },
-  bubble3: {
-    width: 2,
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    borderRadius: 1,
-    position: 'absolute',
-    top: 12,
-    right: 14,
+  chatSkeletonLine: {
+    height: 12,
+    backgroundColor: '#e8e8ef',
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  chatSkeletonLineShort: {
+    width: '60%',
   },
   chatInfo: {
     flex: 1,
     justifyContent: 'center',
   },
   name: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '500',
     color: '#222',
+    marginBottom: 1,
   },
   unreadName: {
-    fontSize: 16,
-    fontWeight: '800', // Extra bold for unread
-    color: '#1ca7ec', // Blue color for unread
+    color: '#0f172a',
+    fontWeight: '700',
   },
   lastMessage: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#888',
-    marginTop: 2,
+    marginTop: 0,
   },
   unreadLastMessage: {
-    fontSize: 14,
-    fontWeight: '600', // Bold for unread
-    color: '#333', // Darker color for unread
-    marginTop: 2,
+    color: '#1d4ed8',
+    fontWeight: '600',
   },
   time: {
-    fontSize: 12,
-    color: '#aaa',
-    marginBottom: 4,
+    fontSize: 11,
+    color: '#bbb',
+    marginBottom: 0,
     textAlign: 'right',
   },
   unreadTime: {
-    fontSize: 12,
-    fontWeight: '600', // Bold for unread
-    color: '#1ca7ec', // Blue color for unread
-    marginBottom: 4,
-    textAlign: 'right',
+    color: '#1ca7ec',
+    fontWeight: '600',
   },
   statusContainer: {
     alignItems: 'flex-end',
@@ -814,13 +748,13 @@ const styles = StyleSheet.create({
     minWidth: 60,
   },
   unreadBadge: {
-    backgroundColor: '#e74c3c',
+    backgroundColor: '#1ca7ec',
     borderRadius: 12,
     minWidth: 24,
     height: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+    marginTop: 6,
     paddingHorizontal: 6,
   },
   unreadBadgeText: {

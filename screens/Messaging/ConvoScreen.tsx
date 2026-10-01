@@ -1,12 +1,16 @@
-import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ScrollView, Alert, Keyboard, BackHandler } from 'react-native'
+import { AppState, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ScrollView, Keyboard, BackHandler, Platform } from 'react-native'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
-import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/Navigator'
 import useMessaging, { Message } from '../../hook/useMessaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import socketService from '../../services/socketService';
+import { api, API_ENDPOINTS } from '../../config/api';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
+import { useAlert } from '../../context/AlertContext';
+import useUnreadMessages from '../../hook/useUnreadMessages.ts';
 
 type ConvoScreenRouteProp = RouteProp<RootStackParamList, 'Convo'>;
 
@@ -16,6 +20,10 @@ export default function ConvoScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>(); 
   const route = useRoute<ConvoScreenRouteProp>();
   const { shopName, shopId, receiverId, receiverType, avatar, useCreativeIcon } = route.params;
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 0);
+  const isFocused = useIsFocused();
+  const { showAlert } = useAlert();
   
   const [inputText, setInputText] = useState('');
   const [inputHeight, setInputHeight] = useState(40);
@@ -24,8 +32,28 @@ export default function ConvoScreen() {
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   
   const scrollViewRef = useRef<ScrollView>(null);
+  const conversationReadMarkerKey = userId ? `lastReadConversation_${userId}` : '';
+  const lastReadSignatureRef = useRef<string>('');
+  const readSyncInFlightRef = useRef(false);
+  const readSyncPendingRef = useRef(false);
+  const readSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const { messages, loading, sendMessage, loadConversation, clearMessages, leaveConversation } = useMessaging(userId, userType);
+  const { clearConversationUnreadState } = useUnreadMessages(userId || '', userType);
+
+  const clearConversationNotification = useCallback(async () => {
+    if (!receiverId || !shopId) return;
+
+    const conversationId = `shop_${shopId}_customer_${userId}_admin_${receiverId}`;
+    try {
+      const { ChatNotificationModule } = require('react-native').NativeModules;
+      if (ChatNotificationModule?.clearConversationNotification) {
+        ChatNotificationModule.clearConversationNotification(conversationId);
+      }
+    } catch (error) {
+      console.log('Failed to clear conversation notification:', error);
+    }
+  }, [receiverId, shopId, userId]);
 
   // Stable references to avoid infinite loops
   const loadConversationRef = useRef(loadConversation);
@@ -38,6 +66,153 @@ export default function ConvoScreen() {
     leaveConversationRef.current = leaveConversation;
     clearMessagesRef.current = clearMessages;
   }, [loadConversation, leaveConversation, clearMessages]);
+
+  const getUnreadIncomingSignature = useCallback(() => {
+    if (!userId || !receiverId || !shopId) {
+      return '';
+    }
+
+    const unreadMessages = messages.filter((message) => {
+      const runtimeMessage = message as Message & { is_read?: number | boolean };
+      return (
+        message.sender_type === receiverType &&
+        message.sender_id?.toString() === receiverId.toString() &&
+        message.receiver_type === userType &&
+        message.receiver_id?.toString() === userId.toString() &&
+        Number(runtimeMessage.is_read ?? 0) === 0
+      );
+    });
+
+    if (unreadMessages.length === 0) {
+      return '';
+    }
+
+    return unreadMessages
+      .map((message) => [
+        message.id ?? 'no-id',
+        message.created_at ?? 'no-created-at',
+        message.sender_id,
+        message.receiver_id,
+        message.message_text,
+      ].join('|'))
+      .join('||');
+  }, [messages, receiverId, receiverType, shopId, userId, userType]);
+
+  async function flushReadSync(signature: string) {
+    if (!signature || !userId || !receiverId || !shopId || !isFocused) {
+      return;
+    }
+
+    if (signature === lastReadSignatureRef.current) {
+      return;
+    }
+
+    if (readSyncInFlightRef.current) {
+      readSyncPendingRef.current = true;
+      return;
+    }
+
+    readSyncInFlightRef.current = true;
+
+    try {
+      // Capture the IDs of currently-unread incoming messages before we mark them read
+      const unreadMessageIds = messages
+        .filter((message) => {
+          const runtimeMessage = message as Message & { is_read?: number | boolean };
+          return (
+            message.sender_type === receiverType &&
+            message.sender_id?.toString() === receiverId.toString() &&
+            message.receiver_type === userType &&
+            message.receiver_id?.toString() === userId.toString() &&
+            Number(runtimeMessage.is_read ?? 0) === 0
+          );
+        })
+        .map((m) => m.id)
+        .filter(Boolean)
+        .map((id) => id?.toString() ?? '');
+
+      await api.put(API_ENDPOINTS.MESSAGES.MARK_READ, {
+        senderId: receiverId,
+        receiverId: userId,
+        shopId,
+        senderType: receiverType,
+        receiverType: userType,
+      });
+
+      await clearConversationUnreadState({
+        sender_id: receiverId,
+        sender_type: receiverType,
+        receiver_id: userId,
+        receiver_type: userType,
+        shop_id: shopId,
+      });
+
+      try {
+        const conversationId = `shop_${shopId}_customer_${userId}_admin_${receiverId}`;
+        const { ChatNotificationModule } = require('react-native').NativeModules;
+        if (ChatNotificationModule?.markConversationRead) {
+          ChatNotificationModule.markConversationRead(conversationId);
+        }
+        if (ChatNotificationModule?.clearConversationNotification) {
+          ChatNotificationModule.clearConversationNotification(conversationId);
+        }
+      } catch (err) {
+        console.log('Failed to clear native conversation notification history:', err);
+      }
+
+      if (conversationReadMarkerKey) {
+        await AsyncStorage.setItem(
+          conversationReadMarkerKey,
+          JSON.stringify({
+            shopId,
+            receiverId,
+            receiverType,
+            timestamp: Date.now(),
+          })
+        );
+      }
+
+      lastReadSignatureRef.current = signature;
+    } catch (e: any) {
+      console.log('Failed to mark messages as read:', e?.response?.data || e?.message || e);
+    } finally {
+      readSyncInFlightRef.current = false;
+
+      if (readSyncPendingRef.current) {
+        readSyncPendingRef.current = false;
+        const latestSignature = getUnreadIncomingSignature();
+        if (latestSignature && latestSignature !== lastReadSignatureRef.current) {
+          void flushReadSync(latestSignature);
+        }
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!isFocused || !userId || !receiverId || !shopId) {
+      return;
+    }
+
+    const signature = getUnreadIncomingSignature();
+    if (!signature || signature === lastReadSignatureRef.current) {
+      return;
+    }
+
+    if (readSyncTimerRef.current) {
+      clearTimeout(readSyncTimerRef.current);
+    }
+
+    readSyncTimerRef.current = setTimeout(() => {
+      void flushReadSync(signature);
+    }, 120);
+
+    return () => {
+      if (readSyncTimerRef.current) {
+        clearTimeout(readSyncTimerRef.current);
+        readSyncTimerRef.current = null;
+      }
+    };
+  }, [isFocused, userId, receiverId, shopId, getUnreadIncomingSignature]);
 
   useEffect(() => {
     const initializeUser = async () => {
@@ -66,6 +241,20 @@ export default function ConvoScreen() {
 
     initializeUser();
   }, []);
+
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      if (nextAppState === 'active' && userId && receiverId && shopId) {
+        void clearConversationNotification();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+    };
+  }, [userId, receiverId, shopId, clearConversationNotification]);
 
   useEffect(() => {
     if (userId && receiverId) {
@@ -104,6 +293,39 @@ export default function ConvoScreen() {
       clearMessagesRef.current();
     };
   }, [userId, receiverId, shopId, userType]); // Removed function dependencies
+
+  // Mark messages as read when the conversation is opened or refocused
+  useFocusEffect(
+    useCallback(() => {
+      const persistReadMarker = async () => {
+        if (!conversationReadMarkerKey || !shopId || !receiverId || !userId) return;
+
+        await AsyncStorage.setItem(
+          conversationReadMarkerKey,
+          JSON.stringify({
+            shopId,
+            receiverId,
+            receiverType,
+            timestamp: Date.now(),
+          })
+        );
+      };
+
+      const clearNativeNotification = async () => {
+        if (!userId || !receiverId || !shopId) return;
+        await clearConversationNotification();
+      };
+
+      void persistReadMarker();
+      void clearNativeNotification();
+
+      return () => {
+        if (userId && receiverId && shopId) {
+          void persistReadMarker();
+        }
+      };
+    }, [userId, receiverId, shopId, receiverType, conversationReadMarkerKey])
+  );
 
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
@@ -152,7 +374,7 @@ export default function ConvoScreen() {
       }, 100);
     } catch (error) {
       console.error('❌ Send message error:', error);
-      Alert.alert('Error', 'Failed to send message. Please try again.');
+      showAlert('Error', 'Failed to send message. Please try again.', undefined, 'error');
     }
   };
 
@@ -264,7 +486,7 @@ export default function ConvoScreen() {
       end={{ x: 1, y: 0 }}
       style={styles.container}
     >
-      <View style={styles.header}>
+      <View style={[styles.header, { marginTop: insets.top || 40 }]}>
         {/* Back Button */}
         <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
           <Image source={require('../../assets/img/icon/back.png')} style={styles.backIcon} />
@@ -306,52 +528,56 @@ export default function ConvoScreen() {
         </View>
       </View>
 
-      <ScrollView 
-        ref={scrollViewRef}
-        style={styles.scrollViewContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <Text>Loading messages...</Text>
-          </View>
-        ) : (
-          <View style={styles.messagesContainer}>
-            {messages.length === 0 ? (
-              <View style={styles.noMessagesContainer}>
-                <Text style={styles.noMessagesText}>No messages yet. Start the conversation!</Text>
-              </View>
-            ) : (
-              messages
-                .map((message, index) => renderMessage(message, index))
-                .filter(Boolean) // Remove null messages
-            )}
-          </View>
-        )}
-      </ScrollView>
+      <View style={styles.content}>
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scrollViewContainer}
+          contentContainerStyle={styles.scrollViewContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <Text>Loading messages...</Text>
+            </View>
+          ) : (
+            <View style={styles.messagesContainer}>
+              {messages.length === 0 ? (
+                <View style={styles.noMessagesContainer}>
+                  <Text style={styles.noMessagesText}>No messages yet. Start the conversation!</Text>
+                </View>
+              ) : (
+                messages
+                  .map((message, index) => renderMessage(message, index))
+                  .filter(Boolean)
+              )}
+            </View>
+          )}
+        </ScrollView>
 
-      {/* Footer (Messaging Input) */}
-      <View style={styles.footer}>
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={[
-              styles.inputPlaceholder, 
-              { height: Math.min(Math.max(40, inputHeight), screenHeight * 0.20) } 
-            ]}
-            placeholder="Type a message..."
-            placeholderTextColor="#999"
-            keyboardType="default"
-            multiline={true}
-            value={inputText}
-            onChangeText={setInputText}
-            onContentSizeChange={(e) =>
-              setInputHeight(e.nativeEvent.contentSize.height)
-            }
-          />
-        </View>
-        <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
-          <Image source={require('../../assets/img/icon/sent2.png')} style={styles.sendIcon} />
-        </TouchableOpacity>
+        {/* Footer (Messaging Input) with safe area */}
+        <SafeAreaView edges={['bottom']} style={[styles.footerSafe, { paddingBottom: bottomInset }]}>
+          <View style={styles.footerInner}>
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={[
+                  styles.inputPlaceholder,
+                  { height: Math.min(Math.max(40, inputHeight), screenHeight * 0.2) }
+                ]}
+                placeholder="Type a message..."
+                placeholderTextColor="#999"
+                keyboardType="default"
+                multiline={true}
+                value={inputText}
+                onChangeText={setInputText}
+                onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+              />
+            </View>
+            <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
+              <Image source={require('../../assets/img/icon/sent2.png')} style={styles.sendIcon} />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
       </View>
     </LinearGradient>
   )
@@ -359,6 +585,9 @@ export default function ConvoScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  content: {
     flex: 1,
   },
   header: {
@@ -421,20 +650,22 @@ const styles = StyleSheet.create({
     resizeMode: 'cover',
   },
   messageContainer: {
-    marginVertical: 4,
-    paddingHorizontal: 8,
+    marginVertical: 2,
+    paddingHorizontal: 0,
   },
   myMessage: {
     alignSelf: 'flex-end',
     alignItems: 'flex-end',
+    marginRight: 0,
   },
   otherMessage: {
     alignSelf: 'flex-start',
     alignItems: 'flex-start',
+    marginLeft: 0,
   },
   messageBubble: {
     maxWidth: '80%',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 18,
     marginBottom: 2,
@@ -470,12 +701,23 @@ const styles = StyleSheet.create({
   footer: {
     width: '100%',
     backgroundColor: '#ffffff',
-    position: 'absolute',
-    bottom: 0,
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 15,
-    paddingVertical: 14, 
+    paddingVertical: 14,
+    borderTopColor: '#4f4f4f45',
+    borderTopWidth: 1,
+  },
+  footerSafe: {
+    backgroundColor: '#ffffff',
+    borderTopColor: '#4f4f4f45',
+    borderTopWidth: 1,
+  },
+  footerInner: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 15,
+    paddingTop: 8,
   },
   inputContainer: {
     flex: 1,
@@ -506,8 +748,10 @@ const styles = StyleSheet.create({
   },
   scrollViewContainer: {
     flex: 1,
+  },
+  scrollViewContent: {
     paddingHorizontal: 16,
-    marginBottom: 70,
+    paddingBottom: 10,
   },
   loadingContainer: {
     flex: 1,
