@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ScrollView,
   KeyboardAvoidingView,
   TouchableWithoutFeedback,
   Keyboard,
@@ -18,6 +20,40 @@ import { RootStackParamList } from '../../navigation/Navigator';
 import { api, API_ENDPOINTS } from '../../config/api';
 import { useAlert } from '../../context/AlertContext';
 
+const ProcessingOverlay = ({ label }: { label: string }) => {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 900,
+        useNativeDriver: true,
+      })
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [rotation]);
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <View style={styles.loadingOverlay}>
+      <View style={styles.loadingCard}>
+      <Animated.View
+        style={[styles.loadingSpinner, { transform: [{ rotate }] }]}
+      />
+        <Text style={styles.loadingTitle}>{label}</Text>
+        <Text style={styles.loadingSubtitle}>Please wait a moment...</Text>
+      </View>
+    </View>
+  );
+};
+
 export default function PasswordRecovery() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { showAlert } = useAlert();
@@ -29,6 +65,7 @@ export default function PasswordRecovery() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [resendTimer, setResendTimer] = useState(0);
   const [showPhoneValidation, setShowPhoneValidation] = useState(false);
   const [phoneError, setPhoneError] = useState('');
@@ -151,6 +188,7 @@ export default function PasswordRecovery() {
     }
 
     const normalizedPhone = getNormalizedPhoneNumber(phoneNumber);
+    setLoadingMessage('Sending verification code...');
     setLoading(true);
 
     try {
@@ -172,6 +210,7 @@ export default function PasswordRecovery() {
       showAlert('Error', error.response?.data?.message || 'Failed to send OTP. Please try again.', undefined, 'error');
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -183,6 +222,7 @@ export default function PasswordRecovery() {
     }
 
     setLoading(true);
+    setLoadingMessage('Verifying OTP...');
 
     try {
       const response = await api.post(API_ENDPOINTS.CUSTOMERS.VERIFY_OTP, {
@@ -207,6 +247,7 @@ export default function PasswordRecovery() {
       otpRefs.current[0]?.focus();
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -227,6 +268,7 @@ export default function PasswordRecovery() {
     }
 
     const normalizedPhone = getNormalizedPhoneNumber(phoneNumber);
+    setLoadingMessage('Resetting password...');
     setLoading(true);
 
     try {
@@ -251,6 +293,7 @@ export default function PasswordRecovery() {
       showAlert('Error', error.response?.data?.message || 'Failed to reset password. Please try again.', undefined, 'error');
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -262,6 +305,7 @@ export default function PasswordRecovery() {
     }
 
     const normalizedPhone = getNormalizedPhoneNumber(phoneNumber);
+    setLoadingMessage('Sending OTP...');
     setLoading(true);
 
     try {
@@ -282,6 +326,7 @@ export default function PasswordRecovery() {
       showAlert('Error', error.response?.data?.message || 'Failed to resend OTP. Please try again.', undefined, 'error');
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -378,9 +423,7 @@ export default function PasswordRecovery() {
         ]}
         disabled={loading || (showPhoneValidation && !!phoneNumber.trim() && !validatePhoneNumber(phoneNumber))}
       >
-        <Text style={styles.buttonText}>
-          {loading ? 'Sending OTP...' : 'Send OTP'}
-        </Text>
+        <Text style={styles.buttonText}>Send OTP</Text>
       </TouchableOpacity>
     </View>
   );
@@ -437,9 +480,7 @@ export default function PasswordRecovery() {
         style={[styles.button, (!isOTPComplete() || loading) && styles.buttonDisabled]}
         disabled={!isOTPComplete() || loading}
       >
-        <Text style={styles.buttonText}>
-          {loading ? 'Verifying...' : 'Verify'}
-        </Text>
+        <Text style={styles.buttonText}>Verify</Text>
       </TouchableOpacity>
     </View>
   );
@@ -507,9 +548,7 @@ export default function PasswordRecovery() {
         style={[styles.button, loading && styles.buttonDisabled]}
         disabled={loading}
       >
-        <Text style={styles.buttonText}>
-          {loading ? 'Resetting...' : 'Reset Password'}
-        </Text>
+        <Text style={styles.buttonText}>Reset Password</Text>
       </TouchableOpacity>
     </View>
   );
@@ -523,10 +562,16 @@ export default function PasswordRecovery() {
     >
       <KeyboardAvoidingView 
         style={{ flex: 1 }} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.content}>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.header}>
               <TouchableOpacity onPress={handleBack} style={styles.backButton}>
                 <Image source={require('../../assets/img/icon/back.png')} style={styles.backIcon} />
@@ -551,9 +596,10 @@ export default function PasswordRecovery() {
                 <Text style={styles.loginLink}>Login</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </ScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+      {loading ? <ProcessingOverlay label={loadingMessage} /> : null}
     </LinearGradient>
   );
 }
@@ -564,8 +610,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   content: {
-    flex: 1,
-    paddingTop: 40,
+    flexGrow: 1,
+    paddingTop: 24,
+    paddingBottom: 20,
   },
   header: {
     alignItems: 'center',
@@ -705,6 +752,45 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(20, 50, 80, 0.32)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  loadingCard: {
+    minWidth: 220,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 18,
+    paddingHorizontal: 24,
+    paddingVertical: 22,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  loadingSpinner: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: '#b9d7f2',
+    borderTopColor: '#2b7ecb',
+    marginBottom: 12,
+  },
+  loadingTitle: {
+    color: '#2b7ecb',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  loadingSubtitle: {
+    color: '#66727f',
+    fontSize: 12,
+    marginTop: 5,
   },
   resendContainer: {
     flexDirection: 'row',

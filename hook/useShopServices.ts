@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../config/api';
+import { getApiErrorMessage } from '../utils/getApiErrorMessage';
 
 interface Service {
   service_id: number;
@@ -26,7 +27,7 @@ export default function useShopServices(shop_id: number) {
       setError(null);
     } catch (err: any) {
       console.log('Error fetching services:', err.message);
-      setError('Failed to load services');
+      setError(getApiErrorMessage(err, 'Failed to load services.'));
     } finally {
       setLoading(false);
     }

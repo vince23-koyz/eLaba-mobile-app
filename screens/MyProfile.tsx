@@ -300,6 +300,23 @@ export default function MyProfile() {
       return;
     }
 
+    if (/\d/.test(editedData.firstName) || /\d/.test(editedData.lastName)) {
+      showAppAlert('Invalid name', 'First name and last name cannot contain numbers.');
+      return;
+    }
+
+    const addressFields = [
+      { label: 'Street', value: editedData.street },
+      { label: 'Zone', value: editedData.zone },
+      { label: 'Barangay', value: editedData.barangay },
+      { label: 'City', value: editedData.city },
+    ];
+    const missingAddressField = addressFields.find(({ value }) => !value.trim());
+    if (missingAddressField) {
+      showAppAlert('Incomplete address', `Please enter your ${missingAddressField.label.toLowerCase()}.`);
+      return;
+    }
+
     setSaving(true);
     try {
       // Use customer ID from userData
@@ -310,13 +327,13 @@ export default function MyProfile() {
 
       // Save to database via API   
   const response = await api.put(API_ENDPOINTS.CUSTOMERS.BY_ID(userData.customer_id), {
-            first_name: editedData.firstName,
-            last_name: editedData.lastName,
-            username: editedData.username,
-            street: editedData.street,
-            zone: editedData.zone,
-            barangay: editedData.barangay,
-            city: editedData.city,
+        first_name: editedData.firstName.trim(),
+        last_name: editedData.lastName.trim(),
+        username: editedData.username.trim(),
+        street: editedData.street.trim(),
+        zone: editedData.zone.trim(),
+        barangay: editedData.barangay.trim(),
+        city: editedData.city.trim(),
           });
 
       if (response.data.success) {
@@ -464,17 +481,6 @@ export default function MyProfile() {
             {/* Account Settings-like section */}
             <View style={styles.settingsContainer}>
               <Text style={styles.settingsHeader}>Account</Text>
-              <TouchableOpacity
-                style={styles.settingsRow}
-                onPress={() => navigation.navigate('ChangePhoneNumber')}
-                activeOpacity={0.7}
-              >
-                <View>
-                  <Text style={styles.settingsLabel}>Phone Number</Text>
-                  <Text style={styles.settingsValue}>{maskPhoneNumber(userData.phone_number)}</Text>
-                </View>
-                <Text style={styles.chevron}>{'›'}</Text>
-              </TouchableOpacity>
             </View>
 
             {/* Username Field */}
@@ -500,7 +506,7 @@ export default function MyProfile() {
                 <TextInput
                   style={styles.editInput}
                   value={editedData.firstName}
-                  onChangeText={(text) => setEditedData({...editedData, firstName: text})}
+                  onChangeText={(text) => setEditedData({...editedData, firstName: text.replace(/\d/g, '')})}
                   placeholder="Enter first name"
                   placeholderTextColor="#999"
                 />
@@ -516,7 +522,7 @@ export default function MyProfile() {
                 <TextInput
                   style={styles.editInput}
                   value={editedData.lastName}
-                  onChangeText={(text) => setEditedData({...editedData, lastName: text})}
+                  onChangeText={(text) => setEditedData({...editedData, lastName: text.replace(/\d/g, '')})}
                   placeholder="Enter last name"
                   placeholderTextColor="#999"
                 />

@@ -8,6 +8,7 @@ class SocketService {
   private currentUserType: 'customer' | 'admin' = 'customer';
   private lifecycleHandlersAttached = false;
   private receiveMessageHandlers = new Set<(message: any) => void>();
+  private messageUnsentHandlers = new Set<(payload: any) => void>();
 
   private constructor() {}
 
@@ -107,6 +108,9 @@ class SocketService {
     receiver_id: string;
     shop_id: string;
     message_text: string;
+    message_id?: number;
+    reply_to_message_id?: number | null;
+    reply_to_message_text?: string | null;
   }) {
     if (this.socket?.connected) {
       console.log('📤 Emitting message via socket:', messageData);
@@ -143,6 +147,43 @@ class SocketService {
 
     this.receiveMessageHandlers.clear();
     this.socket.off('receiveMessage');
+  }
+
+  sendMessageUnsent(payload: {
+    message_id: number;
+    sender_type: 'customer' | 'admin';
+    sender_id: string;
+    receiver_type: 'customer' | 'admin';
+    receiver_id: string;
+    shop_id: string;
+    is_unsent: boolean;
+    unsent_at?: string;
+  }) {
+    if (this.socket?.connected) {
+      this.socket.emit('messageUnsent', payload);
+    }
+  }
+
+  onMessageUnsent(callback: (payload: any) => void) {
+    if (this.socket) {
+      this.messageUnsentHandlers.add(callback);
+      this.socket.on('messageUnsent', callback);
+    }
+  }
+
+  offMessageUnsent(callback?: (payload: any) => void) {
+    if (!this.socket) {
+      return;
+    }
+
+    if (callback) {
+      this.messageUnsentHandlers.delete(callback);
+      this.socket.off('messageUnsent', callback);
+      return;
+    }
+
+    this.messageUnsentHandlers.clear();
+    this.socket.off('messageUnsent');
   }
 
   private buildConversationId(shopId: string, senderId: string, senderType: 'customer' | 'admin', receiverId: string) {

@@ -4,7 +4,6 @@ import messaging from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import socketService from '../services/socketService';
 import { updateDeviceToken } from '../services/notificationService';
-import { handleNotificationNavigation } from '../services/notificationNavigation';
 
 async function requestNotificationPermission() {
     if (Platform.OS === 'android') {
@@ -34,7 +33,7 @@ export const useNotifications = () => {
         let unsubscribeTokenRefresh: (() => void) | undefined;
 
         const init = async () => {
-            const granted = await requestNotificationPermission();
+            await requestNotificationPermission();
 
             // Ensure we have a logged-in customer id
             const customerId = await getCustomerId();
@@ -83,21 +82,6 @@ export const useNotifications = () => {
                 // Optionally: show in-app banner or update state
             });
 
-            // When app opened from a background state
-            messaging().onNotificationOpenedApp((remoteMessage) => {
-                if (remoteMessage?.data) {
-                    handleNotificationNavigation(remoteMessage.data as any);
-                }
-            });
-
-            // When app opened from quit state
-            messaging()
-                .getInitialNotification()
-                .then((remoteMessage) => {
-                    if (remoteMessage?.data) {
-                        handleNotificationNavigation(remoteMessage.data as any);
-                    }
-                });
         };
 
         init();

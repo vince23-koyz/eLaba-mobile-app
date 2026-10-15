@@ -25,6 +25,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import useShops from '../../hook/useShops';
 import useShopServices from '../../hook/useShopServices';
 import { API_CONFIG } from '../../config/api';
+import { isShopOpenForBookings } from '../../utils/shopAvailability';
 
 type ShopDetailsNavProp = NativeStackNavigationProp< RootStackParamList,'ShopDetails'>;
 type ShopDetailsRouteProp = RouteProp<RootStackParamList, 'ShopDetails'>;
@@ -53,6 +54,7 @@ export default function ShopDetailsScreen() {
   const [selectedType, setSelectedType] = useState<'Walk in' | 'Pick up' | null>(null);
 
   const shop = shops.find(s => Number(s.shop_id) === normalizedShopId) || shopDetailData || null;
+  const isShopOpen = isShopOpenForBookings(shop?.status);
   const pickupEnabled = !!shop && (shop.pickup_delivery_enabled === true || shop.pickup_delivery_enabled === 1 || String(shop.pickup_delivery_enabled) === '1');
   const bookingTypes = ['Walk in', ...(pickupEnabled ? ['Pick up'] : [])] as const;
   const shopName = shop?.name && String(shop.name).trim() ? shop.name : 'Shop';
@@ -259,6 +261,9 @@ export default function ShopDetailsScreen() {
                 )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.shopName}>{shopName}</Text>
+                  <View style={[styles.shopStatusBadge, !isShopOpen && styles.shopStatusBadgeClosed]}>
+                    <Text style={styles.shopStatusText}>{isShopOpen ? 'Open' : 'Closed'}</Text>
+                  </View>
                   <View style={styles.operationHoursContainer}>
                     <View style={styles.operationHoursBadge}>
                       <Text style={styles.operationHoursLabel}>Operating Hours</Text>
@@ -266,7 +271,13 @@ export default function ShopDetailsScreen() {
                     <Text style={styles.shopHours}>{shop.operation_hours || 'Hours not available'}</Text>
                   </View>
 
-                  <TouchableOpacity onPress={handleMessagePress} style={styles.messageActionRow}>
+                  <TouchableOpacity
+                    onPress={handleMessagePress}
+                    style={styles.messageActionRow}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Message ${shopName}`}
+                  >
                     <Image source={require('../../assets/img/icon/chats.png')} style={styles.messageIcon} />
                     <Text style={styles.messageText}>Message</Text>
                   </TouchableOpacity>
@@ -425,13 +436,14 @@ export default function ShopDetailsScreen() {
       {/* Floating Book Now Button */}
       {!servicesLoading && services.length > 0 && (
         <TouchableOpacity 
-          style={styles.floatingBtn} 
+          style={[styles.floatingBtn, !isShopOpen && styles.floatingBtnClosed]} 
+          disabled={!isShopOpen}
           onPress={() => {
             setSelectedType('Walk in');
             setModalVisible(true);
           }}
         >
-          <Text style={styles.floatingBtnText}>Book Now</Text>
+          <Text style={styles.floatingBtnText}>{isShopOpen ? 'Book Now' : 'Closed'}</Text>
         </TouchableOpacity>
       )}
 
@@ -467,9 +479,10 @@ export default function ShopDetailsScreen() {
                 <Text style={styles.modalBtnText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={[styles.modalBtn, { backgroundColor: '#007bff' }]}
+                style={[styles.modalBtn, { backgroundColor: isShopOpen ? '#007bff' : '#9ca3af' }]}
+                disabled={!isShopOpen}
                   onPress={() => {
-                    if (selectedType) {
+                    if (selectedType && isShopOpen) {
                       setModalVisible(false);
                       navigation.navigate('BookingService', {
                         type: selectedType,
@@ -659,6 +672,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: 0.3,
   }, 
+  shopStatusBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#dcfce7',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 6,
+  },
+  shopStatusBadgeClosed: { backgroundColor: '#fee2e2' },
+  shopStatusText: { color: '#166534', fontSize: 12, fontWeight: '700' },
   operationHoursContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -687,24 +710,31 @@ const styles = StyleSheet.create({
   messageActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
+    justifyContent: 'center',
+    marginTop: 10,
     alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#eaf5ff',
-    borderRadius: 999,
+    minHeight: 40,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#147be9',
+    borderRadius: 12,
+    shadowColor: '#147be9',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 3,
   },
   messageIcon: {
-    width: 18,
-    height: 18,
-    tintColor: '#147be9',
-    marginRight: 6,
+    width: 19,
+    height: 19,
+    tintColor: '#fff',
+    marginRight: 7,
   },
   messageText: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#147be9',
-    letterSpacing: 0.2,
+    color: '#fff',
+    letterSpacing: 0.3,
   },
   
   // TAB ROW
@@ -906,6 +936,11 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  floatingBtnClosed: {
+    backgroundColor: '#6b7280',
+    shadowOpacity: 0,
+    elevation: 0,
   },
 
   // MODAL

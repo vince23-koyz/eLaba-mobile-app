@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Image } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, Image, Animated, Easing } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/Navigator';
@@ -15,6 +15,7 @@ type Order = {
   booking_date: string;
   booking_status: string;
   total_amount: number;
+  service_name?: string | null;
   shop_id: number;
   shop_name: string;
   customer_id: number;
@@ -41,6 +42,31 @@ const WalkInBookingDetails: React.FC<Props> = ({ route, navigation }) => {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const { userData } = useUserData();
+  const skeletonShimmer = useRef(new Animated.Value(0)).current;
+  const skeletonTranslate = skeletonShimmer.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-260, 260],
+  });
+
+  useEffect(() => {
+    if (!loading) {
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.timing(skeletonShimmer, {
+        toValue: 1,
+        duration: 1300,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => {
+      animation.stop();
+      skeletonShimmer.setValue(0);
+    };
+  }, [loading, skeletonShimmer]);
 
   const normalizeStatus = (status: string) => {
     const s = (status || '').toLowerCase();
@@ -245,6 +271,38 @@ const WalkInBookingDetails: React.FC<Props> = ({ route, navigation }) => {
 
   const canReschedule = status === 'pending';
 
+  const renderSkeletonBlock = (style: object) => (
+    <View style={[styles.skeletonBlock, style]}>
+      <Animated.View
+        style={[styles.skeletonShimmer, { transform: [{ translateX: skeletonTranslate }] }]}
+      />
+    </View>
+  );
+
+  const renderLoadingSkeleton = () => (
+    <>
+      <View style={styles.card}>
+        {renderSkeletonBlock(styles.skeletonTitle)}
+        <View style={styles.skeletonStepper}>
+          {steps.map((step) => (
+            <View key={step} style={styles.skeletonStep}>
+              {renderSkeletonBlock(styles.skeletonDot)}
+              {renderSkeletonBlock(styles.skeletonStepLabel)}
+            </View>
+          ))}
+        </View>
+        {renderSkeletonBlock(styles.skeletonMessage)}
+      </View>
+      <View style={styles.card}>
+        {renderSkeletonBlock(styles.skeletonTitle)}
+        {renderSkeletonBlock(styles.skeletonRow)}
+        {renderSkeletonBlock(styles.skeletonRow)}
+        {renderSkeletonBlock(styles.skeletonRow)}
+        {renderSkeletonBlock(styles.skeletonRow)}
+      </View>
+    </>
+  );
+
   const handleCancel = () => {
     if (!order) return;
     if (status !== 'pending') {
@@ -262,18 +320,26 @@ const WalkInBookingDetails: React.FC<Props> = ({ route, navigation }) => {
           primary: true,
           onPress: async () => {
             try {
-              await api.patch(`${API_ENDPOINTS.BOOKINGS.BASE}/${order.booking_id}/status`, {
+              const response = await api.patch(`${API_ENDPOINTS.BOOKINGS.BASE}/${order.booking_id}/status`, {
                 status: 'cancelled',
                 customer_id: order.customer_id,
               });
               setOrder({ ...order, booking_status: 'cancelled' as any });
               if (isPaidGcash(order)) {
+                const refundStatus = String(response.data?.refund?.status || '').toLowerCase();
+                const refundMessage = response.data?.refund_error || refundStatus === 'failed'
+                  ? 'Your booking was cancelled, but the automatic refund failed to start. Check Refunds for its status.'
+                  : refundStatus === 'succeeded'
+                    ? 'Your booking was cancelled and the GCash refund succeeded.'
+                    : refundStatus
+                      ? 'Your booking was cancelled and the automatic GCash refund is being processed. Check Refunds for its status.'
+                      : 'Your booking was cancelled. The system will handle the refund when the GCash payment is confirmed.';
                 showAlert(
                   'Booking Cancelled',
-                  'Your booking has been cancelled. You paid this booking through GCash. Would you like to request a refund now?',
+                  refundMessage,
                   [
-                    { text: 'Later', style: 'cancel', onPress: () => navigation.goBack() },
-                    { text: 'Request now', primary: true, onPress: () => navigation.navigate('Transaction', { initialTab: 'refunds' }) },
+                    { text: 'Done', style: 'cancel', onPress: () => navigation.goBack() },
+                    { text: 'View Refunds', primary: true, onPress: () => navigation.navigate('Transaction', { initialTab: 'refunds' }) },
                   ],
                   'success'
                 );
@@ -308,7 +374,7 @@ const WalkInBookingDetails: React.FC<Props> = ({ route, navigation }) => {
       </LinearGradient>
 
       {loading ? (
-        <View style={styles.card}><Text>Loading...</Text></View>
+        renderLoadingSkeleton()
       ) : !order ? (
         <View style={styles.card}><Text>Order not found</Text></View>
       ) : status !== 'cancelled' && (
@@ -349,6 +415,7 @@ const WalkInBookingDetails: React.FC<Props> = ({ route, navigation }) => {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Order Details</Text>
         <View style={styles.row}><Text style={styles.label}>Shop</Text><Text style={styles.value}>{order.shop_name}</Text></View>
+        <View style={styles.row}><Text style={styles.label}>Service</Text><Text style={styles.value}>{order.service_name || 'Not specified'}</Text></View>
         <View style={styles.row}><Text style={styles.label}>Date</Text><Text style={styles.value}>{new Date(order.booking_date).toLocaleDateString()}</Text></View>
         <View style={styles.row}><Text style={styles.label}>Amount</Text><Text style={styles.value}>₱{Number(order.total_amount).toFixed(2)}</Text></View>
         {rescheduleRequest && (
@@ -468,6 +535,15 @@ const styles = StyleSheet.create({
   backIcon: { width: 24, height: 24, resizeMode: 'contain', tintColor: '#fff' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff', flex: 1, textAlign: 'center' },
   card: { backgroundColor: '#fff', margin: 16, padding: 16, borderRadius: 12, elevation: 2 },
+  skeletonBlock: { height: 12, borderRadius: 8, backgroundColor: '#e8eef5', overflow: 'hidden' },
+  skeletonShimmer: { position: 'absolute', top: 0, bottom: 0, left: -260, width: 180, backgroundColor: 'rgba(255,255,255,0.7)' },
+  skeletonTitle: { width: '42%', height: 16, marginBottom: 18 },
+  skeletonStepper: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
+  skeletonStep: { flex: 1, alignItems: 'center', gap: 8 },
+  skeletonDot: { width: 14, height: 14, borderRadius: 7 },
+  skeletonStepLabel: { width: '70%' },
+  skeletonMessage: { width: '100%', height: 38, borderRadius: 10 },
+  skeletonRow: { width: '100%', height: 30, marginBottom: 8 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1e293b', marginBottom: 12 },
   stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   stepItem: { flex: 1, alignItems: 'center', position: 'relative' },

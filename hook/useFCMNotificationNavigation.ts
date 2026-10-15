@@ -2,23 +2,34 @@ import { useEffect } from 'react';
 import { Linking } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
 import { handleNotificationNavigation } from '../services/notificationNavigation';
+import { navigate } from '../navigation/RootNavigation';
 
 function parseChatUrl(urlString: string | null) {
   if (!urlString) return null;
   try {
-    const url = new URL(urlString);
-    if (url.protocol !== 'elaba:' || url.hostname !== 'chat') {
+    const prefix = 'elaba://chat';
+    if (!urlString.startsWith(prefix)) {
       return null;
     }
 
+    const query = urlString.slice(prefix.length).replace(/^\?/, '');
+    const params: Record<string, string> = {};
+    query.split('&').forEach(pair => {
+      if (!pair) return;
+      const [rawKey, rawValue = ''] = pair.split('=');
+      params[decodeURIComponent(rawKey)] = decodeURIComponent(rawValue.replace(/\+/g, ' '));
+    });
+
     return {
-      sender_type: url.searchParams.get('sender_type') ?? undefined,
-      sender_id: url.searchParams.get('sender_id') ?? undefined,
-      sender_name: url.searchParams.get('sender_name') ?? undefined,
-      receiver_type: url.searchParams.get('receiver_type') ?? undefined,
-      receiver_id: url.searchParams.get('receiver_id') ?? undefined,
-      shop_id: url.searchParams.get('shop_id') ?? undefined,
-      conversationId: url.searchParams.get('conversationId') ?? undefined,
+      sender_type: params.sender_type,
+      sender_id: params.sender_id,
+      sender_name: params.sender_name,
+      receiver_type: params.receiver_type,
+      receiver_id: params.receiver_id,
+      shop_id: params.shop_id,
+      shop_name: params.shop_name,
+      shop_image_url: params.shop_image_url,
+      conversationId: params.conversationId,
     };
   } catch (error) {
     console.warn('[FCM] Failed to parse chat deep link:', urlString, error);
@@ -28,10 +39,29 @@ function parseChatUrl(urlString: string | null) {
 
 export const useFCMNotificationNavigation = () => {
   useEffect(() => {
+    const navigateToNotifications = (data: any) => {
+      const bookingId = Number(data.bookingId ?? data.booking_id);
+      navigate('Home', {
+        screen: 'Notification',
+        params: {
+          notificationId: data.notificationId ?? data.notification_id,
+          bookingId: Number.isFinite(bookingId) ? bookingId : undefined,
+        },
+      });
+    };
+
     const handleNotificationOpen = (remoteMessage: any) => {
-      if (remoteMessage?.data) {
-        handleNotificationNavigation(remoteMessage.data as any);
+      const data = remoteMessage?.data;
+      if (!data) {
+        return;
       }
+
+      if (data.isChat === '1' || data.conversationId) {
+        handleNotificationNavigation(data);
+        return;
+      }
+
+      navigateToNotifications(data);
     };
 
     const unsubscribeOpened = messaging().onNotificationOpenedApp((remoteMessage) => {
@@ -41,11 +71,23 @@ export const useFCMNotificationNavigation = () => {
     const getInitialNotification = async () => {
       const remoteMessage = await messaging().getInitialNotification();
       if (remoteMessage?.data) {
-        handleNotificationNavigation(remoteMessage.data as any);
+        handleNotificationOpen(remoteMessage);
       }
     };
 
     const handleUrl = (url: string | null) => {
+      if (url?.startsWith('elaba://notifications')) {
+        const query = url.slice('elaba://notifications'.length).replace(/^\?/, '');
+        const params: Record<string, string> = {};
+        query.split('&').forEach(pair => {
+          if (!pair) return;
+          const [rawKey, rawValue = ''] = pair.split('=');
+          params[decodeURIComponent(rawKey)] = decodeURIComponent(rawValue.replace(/\+/g, ' '));
+        });
+        navigateToNotifications(params);
+        return;
+      }
+
       const data = parseChatUrl(url);
       if (data) {
         handleNotificationNavigation(data as any);

@@ -15,6 +15,7 @@ import {
   MessageSquare,
   PlusCircle,
   CheckCircle2,
+  CircleX,
   AlertTriangle,
   Search,
   Edit3,
@@ -34,6 +35,7 @@ import {
   ShoppingCart,
   Wallet,
   Phone,
+  CalendarX,
 } from "lucide-react-native";
 
 // 🧠 Define types for props
@@ -84,6 +86,7 @@ export const Icons = {
   MapPin: createIcon(MapPin),
   Clock: createIcon(Clock),
   Check: createIcon(CheckCircle2, "#4CAF50"),
+  CircleX: createIcon(CircleX, "#E53935"),
   Alert: createIcon(AlertTriangle, "#FF9800"),
 
   // 💬 Communication

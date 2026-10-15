@@ -1,4 +1,4 @@
-import { AppState, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ScrollView, Keyboard, BackHandler, Platform } from 'react-native'
+import { AppState, Animated, Image, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ScrollView, Keyboard, BackHandler, Platform } from 'react-native'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
 import { useNavigation, useRoute, RouteProp, useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -30,15 +30,21 @@ export default function ConvoScreen() {
   const [userId, setUserId] = useState<string>('');
   const [userType, setUserType] = useState<'customer' | 'admin'>('customer');
   const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [actionMessage, setActionMessage] = useState<Message | null>(null);
+  const [messageToUnsend, setMessageToUnsend] = useState<Message | null>(null);
   
   const scrollViewRef = useRef<ScrollView>(null);
+  const swipeAnimationsRef = useRef<Record<string, Animated.Value>>({});
+  const actionMenuAnimation = useRef(new Animated.Value(0)).current;
+  const unsendModalAnimation = useRef(new Animated.Value(0)).current;
   const conversationReadMarkerKey = userId ? `lastReadConversation_${userId}` : '';
   const lastReadSignatureRef = useRef<string>('');
   const readSyncInFlightRef = useRef(false);
   const readSyncPendingRef = useRef(false);
   const readSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
-  const { messages, loading, sendMessage, loadConversation, clearMessages, leaveConversation } = useMessaging(userId, userType);
+  const { messages, loading, sendMessage, unsendMessage, loadConversation, clearMessages, leaveConversation } = useMessaging(userId, userType);
   const { clearConversationUnreadState } = useUnreadMessages(userId || '', userType);
 
   const clearConversationNotification = useCallback(async () => {
@@ -357,6 +363,8 @@ export default function ConvoScreen() {
       receiver_id: receiverId,
       shop_id: shopId,
       message_text: inputText.trim(),
+      reply_to_message_id: replyingTo?.id ?? replyingTo?.message_id ?? null,
+      reply_to_message_text: replyingTo?.message_text ?? null,
     };
 
     console.log('📤 Sending message:', messageData);
@@ -366,6 +374,7 @@ export default function ConvoScreen() {
       await sendMessage(messageData);
       setInputText('');
       setInputHeight(40);
+      setReplyingTo(null);
       Keyboard.dismiss();
       
       // Immediately scroll to bottom after sending
@@ -384,19 +393,76 @@ export default function ConvoScreen() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleUnsendMessage = (message: Message) => {
+    setActionMessage(null);
+    setMessageToUnsend(message);
+    unsendModalAnimation.setValue(0);
+    Animated.spring(unsendModalAnimation, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 85,
+      friction: 9,
+    }).start();
+  };
+
+  const closeUnsendModal = () => {
+    Animated.timing(unsendModalAnimation, {
+      toValue: 0,
+      duration: 140,
+      useNativeDriver: true,
+    }).start(() => setMessageToUnsend(null));
+  };
+
+  const confirmUnsendMessage = async () => {
+    if (!messageToUnsend) return;
+
+    const message = messageToUnsend;
+    closeUnsendModal();
+    try {
+      await unsendMessage(message);
+    } catch (error) {
+      showAlert('Error', 'Failed to unsend message. Please try again.', undefined, 'error');
+    }
+  };
+
+  const openMessageActions = (message: Message) => {
+    setActionMessage(message);
+    actionMenuAnimation.setValue(0);
+    Animated.spring(actionMenuAnimation, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 90,
+      friction: 9,
+    }).start();
+  };
+
+  const closeMessageActions = () => {
+    Animated.timing(actionMenuAnimation, {
+      toValue: 0,
+      duration: 140,
+      useNativeDriver: true,
+    }).start(() => setActionMessage(null));
+  };
+
+  const handleReplyFromActions = () => {
+    if (!actionMessage) return;
+    setReplyingTo(actionMessage);
+    closeMessageActions();
+  };
+
   const renderMessage = (message: Message, index: number) => {
     // Convert both to strings for comparison to avoid type issues
     const isMyMessage = message.sender_id.toString() === userId.toString() && message.sender_type === userType;
     
     // Additional validation: Only show messages that belong to this conversation
     const isValidMessage = (
-      message.shop_id.toString() === shopId.toString() &&
+      message.shop_id?.toString() === shopId.toString() &&
       (
         // Message sent by current user
-        (message.sender_id.toString() === userId.toString()) ||
+        (message.sender_id?.toString() === userId.toString()) ||
         // Message received by current user from the expected sender
-        (message.sender_id.toString() === receiverId.toString() && 
-         (message.receiver_id.toString() === userId.toString()))
+        (message.sender_id?.toString() === receiverId.toString() && 
+         (message.receiver_id?.toString() === userId.toString()))
       )
     );
 
@@ -424,33 +490,158 @@ export default function ConvoScreen() {
       messageText: message.message_text.substring(0, 20)
     });
     
+    const messageId = message.id ?? message.message_id;
+    const messageKey = String(messageId ?? index);
+    const swipeX = swipeAnimationsRef.current[messageKey] ||
+      (swipeAnimationsRef.current[messageKey] = new Animated.Value(0));
+    const panResponder = PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Math.abs(gestureState.dx) > 8 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+      onPanResponderGrant: () => {
+        swipeX.stopAnimation();
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const clampedOffset = Math.max(-80, Math.min(80, gestureState.dx));
+        swipeX.setValue(clampedOffset);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (Math.abs(gestureState.dx) > 55 && messageId) {
+          setReplyingTo(message);
+        }
+        Animated.spring(swipeX, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 80,
+          friction: 8,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(swipeX, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 80,
+          friction: 8,
+        }).start();
+      },
+    });
+
     return (
       <View
         key={message.id || index}
+        {...panResponder.panHandlers}
         style={[
           styles.messageContainer,
           isMyMessage ? styles.myMessage : styles.otherMessage,
         ]}
       >
-        <View
+        <Animated.View
+          pointerEvents="none"
           style={[
-            styles.messageBubble,
-            isMyMessage ? styles.myMessageBubble : styles.otherMessageBubble,
+            styles.replySwipeHint,
+            {
+              opacity: swipeX.interpolate({
+                inputRange: [-80, -25, 0, 25, 80],
+                outputRange: [1, 0, 0, 0, 1],
+              }),
+            },
           ]}
         >
+          <Text style={styles.replySwipeHintText}>Reply</Text>
+        </Animated.View>
+        <Animated.View
+          style={{
+            transform: [{ translateX: swipeX }],
+          }}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {
+              if (actionMessage) {
+                closeMessageActions();
+              }
+            }}
+            onLongPress={() => {
+              if (!message.is_unsent) {
+                openMessageActions(message);
+              }
+            }}
+            delayLongPress={450}
+            style={[
+            styles.messageBubble,
+            message.is_unsent
+              ? styles.unsentMessageBubble
+              : isMyMessage ? styles.myMessageBubble : styles.otherMessageBubble,
+          ]}>
+          {!message.is_unsent && message.reply_to_message_id && message.reply_to_message_text ? (
+            <View style={[
+              styles.replyQuote,
+              isMyMessage ? styles.myReplyQuote : styles.otherReplyQuote,
+            ]}>
+              <Text
+                numberOfLines={2}
+                style={[styles.replyQuoteText, isMyMessage ? styles.myMessageText : styles.otherMessageText]}
+              >
+                {message.reply_to_message_text}
+              </Text>
+            </View>
+          ) : null}
           <Text style={[
             styles.messageText,
-            isMyMessage ? styles.myMessageText : styles.otherMessageText,
+            message.is_unsent
+              ? styles.unsentMessageText
+              : isMyMessage ? styles.myMessageText : styles.otherMessageText,
           ]}>
-            {message.message_text}
+            {message.is_unsent ? 'Message unsent' : message.message_text}
           </Text>
-          <Text style={[
+          {!message.is_unsent ? <Text style={[
             styles.messageTime,
             isMyMessage ? styles.myMessageTime : styles.otherMessageTime,
           ]}>
             {formatTime(message.created_at)}
-          </Text>
-        </View>
+          </Text> : null}
+          </TouchableOpacity>
+        </Animated.View>
+        {actionMessage &&
+        (actionMessage.id ?? actionMessage.message_id) === messageId ? (
+          <Animated.View
+            style={[
+              styles.messageActionsMenu,
+              isMyMessage ? styles.myMessageActionsMenu : styles.otherMessageActionsMenu,
+              {
+                opacity: actionMenuAnimation,
+                transform: [
+                  {
+                    scale: actionMenuAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.82, 1],
+                    }),
+                  },
+                  {
+                    translateY: actionMenuAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [8, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {isMyMessage && !actionMessage.is_unsent ? (
+              <TouchableOpacity
+                style={styles.messageActionButton}
+                onPress={() => handleUnsendMessage(actionMessage)}
+              >
+                <Text style={styles.unsendActionText}>Unsent</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={styles.messageActionButton}
+              onPress={handleReplyFromActions}
+            >
+              <Text style={styles.replyActionText}>Reply</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        ) : null}
       </View>
     );
   };
@@ -535,6 +726,7 @@ export default function ConvoScreen() {
           contentContainerStyle={styles.scrollViewContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={closeMessageActions}
         >
           {loading ? (
             <View style={styles.loadingContainer}>
@@ -555,9 +747,78 @@ export default function ConvoScreen() {
           )}
         </ScrollView>
 
+        {messageToUnsend ? (
+          <View style={styles.unsendModalLayer}>
+            <TouchableOpacity
+              activeOpacity={1}
+              style={styles.unsendModalBackdrop}
+              onPress={closeUnsendModal}
+            />
+            <Animated.View
+              style={[
+                styles.unsendModalCard,
+                {
+                  opacity: unsendModalAnimation,
+                  transform: [
+                    {
+                      scale: unsendModalAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.86, 1],
+                      }),
+                    },
+                    {
+                      translateY: unsendModalAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [18, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <View style={styles.unsendModalIcon}>
+                <Text style={styles.unsendModalIconText}>!</Text>
+              </View>
+              <Text style={styles.unsendModalTitle}>Unsend message?</Text>
+              <Text style={styles.unsendModalDescription}>
+                This message will be removed for everyone in this conversation.
+              </Text>
+              <View style={styles.unsendModalActions}>
+                <TouchableOpacity
+                  style={[styles.unsendModalButton, styles.cancelUnsendButton]}
+                  onPress={closeUnsendModal}
+                >
+                  <Text style={styles.cancelUnsendText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.unsendModalButton, styles.confirmUnsendButton]}
+                  onPress={confirmUnsendMessage}
+                >
+                  <Text style={styles.confirmUnsendText}>Unsend</Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          </View>
+        ) : null}
+
         {/* Footer (Messaging Input) with safe area */}
         <SafeAreaView edges={['bottom']} style={[styles.footerSafe, { paddingBottom: bottomInset }]}>
           <View style={styles.footerInner}>
+            {replyingTo ? (
+              <View style={styles.replyPreview}>
+                <View style={styles.replyPreviewContent}>
+                  <Text style={styles.replyPreviewLabel}>Replying to message</Text>
+                  <Text numberOfLines={1} style={styles.replyPreviewText}>{replyingTo.message_text}</Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityLabel="Cancel reply"
+                  onPress={() => setReplyingTo(null)}
+                  style={styles.cancelReplyButton}
+                >
+                  <Text style={styles.cancelReplyText}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             <View style={styles.inputContainer}>
               <TextInput
                 style={[
@@ -652,6 +913,21 @@ const styles = StyleSheet.create({
   messageContainer: {
     marginVertical: 2,
     paddingHorizontal: 0,
+    position: 'relative',
+  },
+  replySwipeHint: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -12,
+    left: -52,
+    right: -52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  replySwipeHintText: {
+    color: '#224ee0',
+    fontSize: 12,
+    fontWeight: '600',
   },
   myMessage: {
     alignSelf: 'flex-end',
@@ -678,6 +954,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
     borderBottomLeftRadius: 4,
   },
+  unsentMessageBubble: {
+    backgroundColor: '#e5e5e5',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#d0d0d0',
+  },
+  replyQuote: {
+    borderLeftWidth: 3,
+    borderRadius: 4,
+    marginBottom: 6,
+    paddingLeft: 8,
+    paddingVertical: 3,
+  },
+  myReplyQuote: {
+    borderLeftColor: 'rgba(255, 255, 255, 0.75)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  otherReplyQuote: {
+    borderLeftColor: '#224ee0',
+    backgroundColor: '#e3e3e3',
+  },
+  replyQuoteText: {
+    fontSize: 13,
+    lineHeight: 17,
+  },
   messageText: {
     fontSize: 16,
     lineHeight: 20,
@@ -688,6 +989,10 @@ const styles = StyleSheet.create({
   otherMessageText: {
     color: '#000000',
   },
+  unsentMessageText: {
+    color: '#777777',
+    fontStyle: 'italic',
+  },
   messageTime: {
     fontSize: 11,
     marginTop: 4,
@@ -697,6 +1002,125 @@ const styles = StyleSheet.create({
   },
   otherMessageTime: {
     color: '#999999',
+  },
+  messageActionsMenu: {
+    position: 'absolute',
+    bottom: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 6,
+    marginBottom: 8,
+    zIndex: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  myMessageActionsMenu: {
+    right: 0,
+  },
+  otherMessageActionsMenu: {
+    left: 0,
+  },
+  unsendModalLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unsendModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.42)',
+  },
+  unsendModalCard: {
+    width: '84%',
+    maxWidth: 360,
+    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 18,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  unsendModalIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fff1f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  unsendModalIconText: {
+    color: '#d92d20',
+    fontSize: 26,
+    fontWeight: '700',
+  },
+  unsendModalTitle: {
+    color: '#1f2937',
+    fontSize: 19,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  unsendModalDescription: {
+    color: '#667085',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  unsendModalActions: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 20,
+  },
+  unsendModalButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelUnsendButton: {
+    backgroundColor: '#f2f4f7',
+  },
+  confirmUnsendButton: {
+    backgroundColor: '#d92d20',
+  },
+  cancelUnsendText: {
+    color: '#344054',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  confirmUnsendText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  messageActionButton: {
+    minWidth: 88,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  unsendActionText: {
+    color: '#d92d20',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  replyActionText: {
+    color: '#224ee0',
+    fontSize: 15,
+    fontWeight: '600',
   },
   footer: {
     width: '100%',
@@ -718,6 +1142,41 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 15,
     paddingTop: 8,
+    flexWrap: 'wrap',
+  },
+  replyPreview: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eef2ff',
+    borderLeftWidth: 3,
+    borderLeftColor: '#224ee0',
+    borderRadius: 8,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  replyPreviewContent: {
+    flex: 1,
+  },
+  replyPreviewLabel: {
+    color: '#224ee0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  replyPreviewText: {
+    color: '#555',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  cancelReplyButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  cancelReplyText: {
+    color: '#555',
+    fontSize: 24,
+    lineHeight: 24,
   },
   inputContainer: {
     flex: 1,

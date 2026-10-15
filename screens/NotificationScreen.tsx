@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   Image,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,7 +23,7 @@ import {
   NotificationItem,
 } from '../services/notificationService';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/Navigator';
 import { useAlert } from '../context/AlertContext';
@@ -93,13 +94,25 @@ type NotificationScreenNavigationProp = BottomTabNavigationProp<
 >;
 
 type Props = { navigation: NotificationScreenNavigationProp };
+type NotificationRoute = {
+  key: string;
+  name: 'Notification';
+  params?: {
+    notificationId?: string;
+    bookingId?: number;
+  };
+};
 
 export default function NotificationScreen({ navigation }: Props) {
+  const route = useRoute<NotificationRoute>();
+  const { width } = useWindowDimensions();
+  const compactLayout = width <= 360;
   const { showAlert } = useAlert();
   const [expanded, setExpanded] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [focusedNotificationId, setFocusedNotificationId] = useState<number | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -109,6 +122,47 @@ export default function NotificationScreen({ navigation }: Props) {
     inputRange: [0, 1],
     outputRange: [-220, 220],
   });
+
+  useEffect(() => {
+    const targetNotificationId = route.params?.notificationId;
+    const targetBookingId = route.params?.bookingId;
+    if (
+      loading ||
+      notifications.length <= 1 ||
+      (!targetNotificationId && !targetBookingId)
+    ) {
+      return;
+    }
+
+    const targetIndex = notifications.findIndex(notification =>
+      (targetNotificationId &&
+        String(notification.notification_id) === String(targetNotificationId)) ||
+      (targetBookingId &&
+        Number(notification.booking_id) === Number(targetBookingId))
+    );
+    if (targetIndex < 0) {
+      return;
+    }
+
+    const target = notifications[targetIndex];
+    if (target.is_read !== 0) {
+      setFocusedNotificationId(null);
+      return;
+    }
+
+    setFocusedNotificationId(target.notification_id);
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, targetIndex * 150 - 180),
+        animated: true,
+      });
+    });
+  }, [
+    loading,
+    notifications,
+    route.params?.bookingId,
+    route.params?.notificationId,
+  ]);
 
   // Load customer ID and initial notifications
   useEffect(() => {
@@ -212,6 +266,7 @@ export default function NotificationScreen({ navigation }: Props) {
   };
 
   const markAsRead = async (notificationId: number) => {
+    setFocusedNotificationId(null);
     try {
       await markNotificationAsRead(notificationId);
       setNotifications((prev) =>
@@ -440,6 +495,8 @@ export default function NotificationScreen({ navigation }: Props) {
                     style={[
                       styles.notificationCard,
                       notification.is_read === 0 && styles.unreadCard,
+                      focusedNotificationId === notification.notification_id &&
+                        styles.focusedNotificationCard,
                     ]}
                   >
                     {notification.is_read === 0 && <View style={styles.unreadDot} />}
@@ -448,6 +505,7 @@ export default function NotificationScreen({ navigation }: Props) {
                       style={styles.cardHeader}
                       activeOpacity={0.8}
                       onPress={() => {
+                        setFocusedNotificationId(null);
                         if (notification.is_read === 0) {
                           markAsRead(notification.notification_id);
                         }
@@ -459,10 +517,16 @@ export default function NotificationScreen({ navigation }: Props) {
                         }
                       }}
                     >
-                      <Image
-                        source={notificationIcons[getNotificationType(notification.title)] || notificationIcons.service}
-                        style={styles.cardIcon}
-                      />
+                      {isDeclinedBookingNotification(notification) ? (
+                        <View style={styles.declinedCardIcon}>
+                          <Icons.CircleX size={30} color="#ef4444" />
+                        </View>
+                      ) : (
+                        <Image
+                          source={notificationIcons[getNotificationType(notification.title)] || notificationIcons.service}
+                          style={styles.cardIcon}
+                        />
+                      )}
 
                       <View style={styles.headerContent}>
                         <Text
@@ -513,7 +577,10 @@ export default function NotificationScreen({ navigation }: Props) {
                         {!isDeclinedBookingNotification(notification) && (
                           <TouchableOpacity
                             style={[styles.actionButton, styles.primaryButton]}
-                            onPress={() => CheckProgress(notification)}
+                            onPress={() => {
+                              setFocusedNotificationId(null);
+                              CheckProgress(notification);
+                            }}
                           >
                             <Text style={styles.primaryButtonText}>View Details</Text>
                           </TouchableOpacity>
@@ -565,6 +632,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: '10%',
     paddingHorizontal: 12,
+    maxWidth: 720,
+    width: '100%',
+    alignSelf: 'center',
   },
   notifLabel: {
     fontSize: 20,
@@ -583,8 +653,10 @@ const styles = StyleSheet.create({
   contentContainer: {
     backgroundColor: '#fff',
     width: '100%',
+    maxWidth: 720,
     flex: 1,
     marginTop: 12,
+    alignSelf: 'center',
     borderTopLeftRadius: 25,
     borderTopRightRadius: 25,
     paddingTop: 12,
@@ -618,6 +690,9 @@ const styles = StyleSheet.create({
   notificationCard: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
     marginBottom: 10,
     padding: 12,
     shadowColor: '#000',
@@ -628,6 +703,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ececec',
     position: 'relative',
+  },
+  focusedNotificationCard: {
+    borderWidth: 2,
+    borderColor: '#ffb020',
+    backgroundColor: '#fffaf0',
   },
   unreadCard: {
     borderLeftWidth: 3,
@@ -653,6 +733,13 @@ const styles = StyleSheet.create({
     height: 34,
     marginRight: 10,
     resizeMode: 'contain',
+  },
+  declinedCardIcon: {
+    width: 34,
+    height: 34,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconContainer: {
     marginRight: 10,

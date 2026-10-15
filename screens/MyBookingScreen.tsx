@@ -8,6 +8,7 @@ import {
   SafeAreaView,
   RefreshControl,
   Image,
+  TextInput,
   Animated,
   InteractionManager,
   BackHandler,
@@ -23,6 +24,7 @@ import { api, API_ENDPOINTS, setBaseOrigin, FALLBACK_ORIGINS, API_CONFIG } from 
 import socketService from '../services/socketService';
 import { useAlert } from '../context/AlertContext';
 import Icons from '../components/Icons';
+import { getApiErrorMessage } from '../utils/getApiErrorMessage';
 
 type MyBookingNavProp = NativeStackNavigationProp<RootStackParamList, 'MyBookingScreen'>;
 
@@ -65,6 +67,7 @@ export default function MyBookingScreen() {
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [orderType, setOrderType] = useState<'all' | 'walkin' | 'pickup'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [shopLogos, setShopLogos] = useState<Record<number, string | null>>({});
   const processingRotation = useRef(new Animated.Value(0)).current;
   const processingAnimation = useRef<Animated.CompositeAnimation | null>(null);
@@ -309,12 +312,10 @@ export default function MyBookingScreen() {
           }
         }
         if (!recovered) {
-          const errorMessage = 'Unable to reach the server. Please check your internet connection or try again later.';
-          showAlert('Network Error', errorMessage, undefined, 'error');
+          showAlert('Network Error', getApiErrorMessage(error, 'Unable to load your orders. Please try again.'), undefined, 'error');
         }
       } else {
-        const errorMessage = error?.response?.data?.message || error?.message || 'Failed to load your orders. Please try again.';
-        showAlert('Error', errorMessage, undefined, 'error');
+        showAlert('Error', getApiErrorMessage(error, 'Failed to load your orders. Please try again.'), undefined, 'error');
       }
     } finally {
       if (showLoading) setLoading(false);
@@ -442,6 +443,20 @@ export default function MyBookingScreen() {
     // Filter by status
     if (filterStatus !== 'all') {
       filtered = filtered.filter(order => order.booking_status.toLowerCase() === filterStatus);
+    }
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (normalizedQuery) {
+      filtered = filtered.filter(order => [
+        order.booking_id,
+        order.shop_name,
+        order.service_name,
+        order.service_description,
+        order.booking_status,
+        order.payment_method,
+        order.payment_status,
+        order.booking_date,
+        order.pickup_date,
+      ].some(value => String(value ?? '').toLowerCase().includes(normalizedQuery)));
     }
     return filtered.sort((a, b) => {
       const timestampDifference = getCreatedTimestamp(b) - getCreatedTimestamp(a);
@@ -660,7 +675,7 @@ export default function MyBookingScreen() {
       </Animated.View>
     );
   };
-
+    
   // Walk-in 4-step progress component
   const WalkInStepper: React.FC<{ status: 'pending' | 'confirmed' | 'processing' | 'completed' }> = ({ status }) => {
     const steps = ['Pending', 'Confirmed', 'Processing', 'Completed'];
@@ -782,9 +797,33 @@ export default function MyBookingScreen() {
             style={styles.backIcon} 
           />
         </TouchableOpacity>
-  <Text style={styles.headerTitle}>My Bookings</Text>
-        <View style={styles.headerSpacer} />
+        <Text style={styles.headerTitle}>My Bookings</Text>
       </LinearGradient>
+
+      <View style={styles.searchContainer}>
+        <Icons.Search size={19} color="#64748b" />
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search ID, shop, service, status, payment, or date"
+          placeholderTextColor="#94a3b8"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel="Search bookings"
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setSearchQuery('')}
+            accessibilityRole="button"
+            accessibilityLabel="Clear booking search"
+            style={styles.clearSearchButton}
+          >
+            <Text style={styles.clearSearchText}>×</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Order Type Segmented Control */}
       <View style={styles.segmentContainer}>
@@ -906,8 +945,33 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
   },
-  headerSpacer: {
-    width: 40,
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 2,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    color: '#1e293b',
+    fontSize: 15,
+  },
+  clearSearchButton: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  clearSearchText: {
+    color: '#64748b',
+    fontSize: 22,
+    lineHeight: 24,
   },
   filterContainer: {
     flexDirection: 'row',

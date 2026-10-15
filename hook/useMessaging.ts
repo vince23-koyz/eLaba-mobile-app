@@ -4,6 +4,7 @@ import socketService from '../services/socketService';
 
 export interface Message {
   id?: number;
+  message_id?: number;
   sender_type: 'customer' | 'admin';
   sender_id: string;
   receiver_type: 'customer' | 'admin';
@@ -11,6 +12,10 @@ export interface Message {
   shop_id: string;
   message_text: string;
   created_at?: string;
+  reply_to_message_id?: number | null;
+  reply_to_message_text?: string | null;
+  is_unsent?: number | boolean;
+  unsent_at?: string | null;
 }
 
 export interface Conversation {
@@ -142,13 +147,27 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
 
       // Listen for incoming messages
       socketService.onReceiveMessage(handleIncomingMessage);
+      const handleMessageUnsent = (payload: {
+        message_id: number;
+        is_unsent: boolean;
+        unsent_at?: string;
+      }) => {
+        setMessages(prev => prev.map(message =>
+          (message.id ?? message.message_id)?.toString() === payload.message_id.toString()
+            ? { ...message, is_unsent: payload.is_unsent, unsent_at: payload.unsent_at }
+            : message
+        ));
+      };
+      socketService.onMessageUnsent(handleMessageUnsent);
 
       // Cleanup function
       return () => {
         console.log('🧹 Cleaning up socket listeners');
         socketService.offReceiveMessage(handleIncomingMessage);
+        socketService.offMessageUnsent(handleMessageUnsent);
         setCurrentConversation(null);
       };
+
     }
   }, [userId, userType, currentConversation?.shopId, currentConversation?.receiverId, currentConversation?.senderId]);
 
@@ -171,29 +190,79 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
         }
       }
       
-      // Send via socket for real-time (if connected)
-      if (socketService.isConnected()) {
-        socketService.sendMessage(messageData);
-      }
-
       // Also save to database via API (this ensures message is always saved)
       console.log('💾 Saving message to database');
-  const response = await api.post('/messages', messageData);
+      const response = await api.post('/messages', messageData);
       console.log('✅ Message saved to database:', response.status);
+      const persistedMessageId = response.data.message_id;
+
+      if (!persistedMessageId) {
+        throw new Error('Message was saved without a database message ID.');
+      }
+
+      const persistedMessageData = {
+        ...messageData,
+        message_id: persistedMessageId,
+      };
+
+      // Broadcast only after persistence so every client receives the real database ID.
+      if (socketService.isConnected()) {
+        socketService.sendMessage(persistedMessageData);
+      }
       
       // If socket wasn't connected, add message manually to local state
       if (!socketService.isConnected()) {
         console.log('📱 Adding message to local state (socket not connected)');
         const newMessage: Message = {
-          ...messageData,
-          id: response.data.id || Date.now(),
+          ...persistedMessageData,
+          id: persistedMessageId,
           created_at: new Date().toISOString(),
         };
+
         setMessages(prev => [...prev, newMessage]);
       }
       
     } catch (error) {
       console.error('❌ Error sending message:', error);
+      throw error;
+    }
+  };
+
+  const unsendMessage = async (message: Message) => {
+    const messageId = message.id ?? message.message_id;
+    if (!messageId || message.is_unsent) {
+      throw new Error('This message cannot be unsent.');
+    }
+
+    try {
+      const response = await api.put(`/messages/${messageId}/unsend`, {
+        sender_id: userId,
+        sender_type: userType,
+      });
+      const unsentMessage = response.data?.message;
+
+      setMessages(prev => prev.map(currentMessage =>
+        (currentMessage.id ?? currentMessage.message_id)?.toString() === messageId.toString()
+          ? {
+              ...currentMessage,
+              is_unsent: 1,
+              unsent_at: unsentMessage?.unsent_at,
+            }
+          : currentMessage
+      ));
+
+      socketService.sendMessageUnsent({
+        message_id: messageId,
+        sender_type: userType,
+        sender_id: userId,
+        receiver_type: message.receiver_type,
+        receiver_id: message.receiver_id,
+        shop_id: message.shop_id,
+        is_unsent: true,
+        unsent_at: unsentMessage?.unsent_at,
+      });
+    } catch (error) {
+      console.error('❌ Error unsending message:', error);
       throw error;
     }
   };
@@ -221,13 +290,56 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
         `/messages/conversation/${customerId}/${adminId}/${shopId}`
       );
       
+      const exactMessages = Array.isArray(response.data)
+        ? response.data
+        : Array.isArray(response.data?.data)
+          ? response.data.data
+          : [];
+
+      let conversationMessages = exactMessages;
+      if (conversationMessages.length === 0) {
+        const shopResponse = await api.get(`/messages/shop/${shopId}`);
+        const shopMessages = Array.isArray(shopResponse.data)
+          ? shopResponse.data
+          : Array.isArray(shopResponse.data?.data)
+            ? shopResponse.data.data
+            : [];
+        const customerKey = customerId.toString();
+        const adminKey = adminId.toString();
+        conversationMessages = shopMessages.filter((message: Message) =>
+          message.shop_id?.toString() === shopId.toString() &&
+          (
+            (message.sender_type === 'customer' &&
+              message.sender_id?.toString() === customerKey &&
+              message.receiver_type === 'admin' &&
+              message.receiver_id?.toString() === adminKey) ||
+            (message.sender_type === 'admin' &&
+              message.sender_id?.toString() === adminKey &&
+              message.receiver_type === 'customer' &&
+              message.receiver_id?.toString() === customerKey)
+          )
+        );
+        console.warn('[Messaging] Exact customer conversation was empty; used shop history fallback.', {
+          customerId,
+          adminId,
+          shopId,
+          count: conversationMessages.length,
+        });
+      }
+
       console.log('📨 Conversation API response:', {
         status: response.status,
-        dataLength: response.data?.length || 0,
-        data: response.data
+        dataLength: conversationMessages.length,
+        data: conversationMessages,
       });
       
-      setMessages(response.data || []);
+      setMessages(conversationMessages.map((message: Message) => ({
+        ...message,
+        id: message.id ?? message.message_id,
+        sender_id: message.sender_id?.toString(),
+        receiver_id: message.receiver_id?.toString(),
+        shop_id: message.shop_id?.toString(),
+      })));
       
       // Join the conversation room
       console.log('🏠 Joining conversation room:', { userType, userId, adminId, shopId });
@@ -310,6 +422,7 @@ const useMessaging = (userId: string, userType: 'customer' | 'admin') => {
     conversations,
     loading,
     sendMessage,
+    unsendMessage,
     loadConversation,
     loadConversations,
     clearMessages,

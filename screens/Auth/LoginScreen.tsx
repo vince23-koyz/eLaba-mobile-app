@@ -1,5 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,9 +24,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import messaging from '@react-native-firebase/messaging';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import CustomAlertModal from '../../components/CustomAlertModal';
+import { getApiErrorMessage, isInvalidCredentialsError } from '../../utils/getApiErrorMessage';
 
 
 export default function LoginScreen() {
+  const { width, height } = useWindowDimensions();
+  const isTablet = width >= 768;
+  const isLandscape = width > height;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -25,6 +43,7 @@ export default function LoginScreen() {
   const [showLoginFailedModal, setShowLoginFailedModal] = useState(false);
   const [phoneError, setPhoneError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   // Login attempt lockout state
   const [attemptCount, setAttemptCount] = useState(0);
   const [lockUntil, setLockUntil] = useState<number | null>(null);
@@ -154,26 +173,31 @@ export default function LoginScreen() {
         if (responseCode === 'TOO_MANY_ATTEMPTS' || lock) {
           setErrorMessage('Too many unsuccessful login attempts. Please wait a few minutes before trying again.');
           setShowLoginFailedModal(true);
-        } else {
+        } else if (responseCode === 'INVALID_CREDENTIALS') {
           setErrorMessage('The phone number or password you entered is incorrect. Please check your credentials and try again.');
+          setShowLoginFailedModal(true);
+        } else {
+          setErrorMessage(response.data?.message || 'Unable to log in. Please try again.');
           setShowLoginFailedModal(true);
         }
       }
     } catch (error: any) {
       console.log('Login Error:', error.response?.data || error.message || error);
       setPassword('');
-      const key = phoneNumber.trim();
-      const newCount = attemptCount + 1;
-      let lock = null;
-      if (newCount >= 6) {
-        lock = Date.now() + 5 * 60 * 1000;
-      }
-      await updateAttempts(newCount, lock, key);
-      if (error.response?.data?.code === 'TOO_MANY_ATTEMPTS' || lock) {
+      const responseCode = error.response?.data?.code;
+      const isCredentialFailure = isInvalidCredentialsError(error);
+      if (responseCode === 'TOO_MANY_ATTEMPTS') {
         setErrorMessage('Too many unsuccessful login attempts. Please wait a few minutes before trying again.');
         setShowLoginFailedModal(true);
-      } else {
+      } else if (isCredentialFailure) {
+        const key = phoneNumber.trim();
+        const newCount = attemptCount + 1;
+        const lock = newCount >= 6 ? Date.now() + 5 * 60 * 1000 : null;
+        await updateAttempts(newCount, lock, key);
         setErrorMessage('The phone number or password you entered is incorrect. Please check your credentials and try again.');
+        setShowLoginFailedModal(true);
+      } else {
+        setErrorMessage(getApiErrorMessage(error, 'Unable to log in. Please try again.'));
         setShowLoginFailedModal(true);
       }
     } finally {
@@ -210,52 +234,79 @@ export default function LoginScreen() {
         onRequestClose={() => setShowLoginFailedModal(false)}
         actions={[{ text: 'OK', primary: true, onPress: () => setShowLoginFailedModal(false) }]}
       />
-      <View style={styles.elabaContainer}>
-        <Text style={styles.appTitle}>eLABA: Laundry Booking Services</Text>
-        <Image source={require('../../assets/img/elaba.png')} style={styles.appIcon} />
-        <Text style={styles.login}>Login</Text>
-        <Text style={styles.portal}>Customer Portal</Text>
-      </View>
-      <View style={styles.form}>
-        <Text style={styles.label}>Phone Number</Text>
-        <TextInput
-          style={[styles.input, phoneError ? styles.inputError : null]}
-          placeholder="+63"
-          placeholderTextColor="#3D3D3D"
-          keyboardType="phone-pad"
-          value={phoneNumber}
-          onChangeText={(text) => {
-            setPhoneNumber(text);
-            setPhoneError('');
-          }}
-        />
-        {phoneError ? <Text style={styles.errorText}>{phoneError}</Text> : null}
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={[styles.input, passwordError ? styles.inputError : null]}
-          placeholder="Enter your password"
-          placeholderTextColor="#3D3D3D"
-          secureTextEntry
-          value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            setPasswordError('');
-          }}
-        />
-        {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
-        <TouchableOpacity onPress={handleForgot}>
-          <Text style={styles.forgotText}>Forgot Password?</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={handleLogin} style={styles.loginButton} disabled={loading}>
-          <Text style={styles.loginButtonText}>Login</Text>
-        </TouchableOpacity>
-        <View style={styles.signupContainer}>
-          <Text style={styles.signupText}>Don't have an account? </Text>
-          <TouchableOpacity onPress={handleSignup}>
-            <Text style={styles.signupLink}>Sign Up</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <KeyboardAvoidingView
+        style={[styles.keyboardAvoidingView, { paddingHorizontal: isTablet ? 24 : 20 }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={[styles.elabaContainer, { marginTop: isLandscape ? 28 : 80 }]}> 
+              <Text style={[styles.appTitle, { fontSize: isTablet ? 20 : 16 }]}>eLABA: Laundry Booking Services</Text>
+              <Image source={require('../../assets/img/elaba.png')} style={[styles.appIcon, { width: isTablet ? 90 : 70, height: isTablet ? 90 : 70 }]} />
+              <Text style={[styles.login, { fontSize: isTablet ? 32 : 24 }]}>Login</Text>
+              <Text style={[styles.portal, { fontSize: isTablet ? 20 : 16 }]}>Customer Portal</Text>
+            </View>
+            <View style={[styles.form, { maxWidth: isTablet ? 520 : 420, padding: isTablet ? 28 : 25 }]}> 
+              <Text style={[styles.label, { fontSize: isTablet ? 18 : 16 }]}>Phone Number</Text>
+              <TextInput
+                style={[styles.input, phoneError ? styles.inputError : null]}
+                placeholder="+63"
+                placeholderTextColor="#3D3D3D"
+                keyboardType="phone-pad"
+                value={phoneNumber}
+                onChangeText={(text) => {
+                  setPhoneNumber(text);
+                  setPhoneError('');
+                }}
+              />
+              {phoneError ? <Text style={styles.errorText}>{phoneError}</Text> : null}
+              <Text style={[styles.label, { fontSize: isTablet ? 18 : 16 }]}>Password</Text>
+              <View style={[styles.passwordContainer, passwordError ? styles.inputError : null]}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#3D3D3D"
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setPasswordError('');
+                  }}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  style={styles.eyeButton}
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  <Image
+                    source={showPassword ? require('../../assets/img/icon/visibility.png') : require('../../assets/img/icon/visibility-off.png')}
+                    style={styles.eyeIcon}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              </View>
+              {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+              <TouchableOpacity onPress={handleForgot}>
+                <Text style={styles.forgotText}>Forgot Password?</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleLogin} style={styles.loginButton} disabled={loading}>
+                <Text style={[styles.loginButtonText, { fontSize: isTablet ? 18 : 16 }]}>Login</Text>
+              </TouchableOpacity>
+              <View style={styles.signupContainer}>
+                <Text style={styles.signupText}>Don't have an account? </Text>
+                <TouchableOpacity onPress={handleSignup}>
+                  <Text style={styles.signupLink}>Sign Up</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
       <LoadingOverlay visible={loading} title="Logging you in" subtitle="please wait..." />
     </LinearGradient>
   );
@@ -338,6 +389,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   container: { flex: 1, paddingHorizontal: 20 },
+  keyboardAvoidingView: { flex: 1 },
+  scrollContainer: {
+    flexGrow: 1,
+    paddingBottom: 40,
+  },
   elabaContainer: { alignItems: 'center', marginTop: 80, gap: 10 },
   appTitle: { fontSize: 16, fontWeight: '600', fontStyle: 'italic', textAlign: 'center' },
   appIcon: { width: 70, height: 70, resizeMode: 'center' },
@@ -361,6 +417,35 @@ const styles = StyleSheet.create({
     borderColor: '#89bfb8',
     paddingHorizontal: 15,
     marginBottom: 8,
+  },
+  passwordContainer: {
+    width: '100%',
+    height: 47,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fffcf2',
+    borderRadius: 12,
+    borderWidth: 0.3,
+    borderColor: '#89bfb8',
+    paddingLeft: 15,
+    paddingRight: 10,
+    marginBottom: 8,
+  },
+  passwordInput: {
+    flex: 1,
+    height: '100%',
+    color: '#111827',
+  },
+  eyeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eyeIcon: {
+    width: 18,
+    height: 18,
+    tintColor: '#2b7ecb',
   },
   inputError: {
     borderColor: '#dc2626',

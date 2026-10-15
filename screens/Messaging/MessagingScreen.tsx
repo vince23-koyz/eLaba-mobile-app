@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, FlatList, Image, TouchableOpacity, Platform, Dimensions, StatusBar, SafeAreaView } from 'react-native'
+import { StyleSheet, Text, View, FlatList, Image, TouchableOpacity, Platform, StatusBar, SafeAreaView, useWindowDimensions } from 'react-native'
 import React, { useState, useEffect, useRef } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
 import { useNavigation, useIsFocused } from '@react-navigation/native';
@@ -32,6 +32,8 @@ interface Message {
   receiver_type: 'customer' | 'admin';
   receiver_id: string;
   is_read?: number;
+  is_unsent?: number | boolean | string;
+  unsent_at?: string | null;
 }
 
 // Interface for shops with the latest message information
@@ -43,7 +45,15 @@ interface ShopWithLastMessage extends Shop {
   unreadCount?: number; // Count of unread messages
 }
 
+const isMessageUnsent = (message: Message) =>
+  message.is_unsent === true ||
+  message.is_unsent === 1 ||
+  message.is_unsent === '1';
+
 export default function MessagingScreen() {
+  const { width } = useWindowDimensions();
+  const isCompact = width < 370;
+  const isTablet = width >= 768;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>(); 
   const isFocused = useIsFocused(); // Hook to detect when screen is focused
   const [activeFilter, setActiveFilter] = useState('All Chats');
@@ -119,10 +129,24 @@ export default function MessagingScreen() {
       const shopsWithConversations: ShopWithLastMessage[] = [];
       for (const shop of shops) {
         try {
-          const response = await api.get(`/messages/conversation/${customerUserId}/${shop.admin_id || '1'}/${shop.shop_id}`);
+          const response = await api.get(
+            `/messages/conversation/${customerUserId}/${shop.admin_id || '1'}/${shop.shop_id}`,
+            { params: { _t: Date.now() } }
+          );
           const messages: Message[] = response.data || [];
           if (messages.length > 0) {
-            const latestMessage = messages[messages.length - 1];
+            const latestMessage = messages.reduce((latest, message) => {
+              const latestIsUnsent = isMessageUnsent(latest);
+              const messageIsUnsent = isMessageUnsent(message);
+              const latestActivity = new Date(
+                latestIsUnsent && latest.unsent_at ? latest.unsent_at : latest.created_at
+              ).getTime();
+              const messageActivity = new Date(
+                messageIsUnsent && message.unsent_at ? message.unsent_at : message.created_at
+              ).getTime();
+
+              return messageActivity > latestActivity ? message : latest;
+            });
             const unreadForCustomer = messages.filter((msg: Message) => 
               msg.receiver_type === 'customer' &&
               msg.receiver_id?.toString() === customerUserId.toString() &&
@@ -140,15 +164,28 @@ export default function MessagingScreen() {
             const isLastMessageFromCurrentUser =
               latestMessage.sender_type === 'customer' &&
               latestMessage.sender_id?.toString() === customerUserId.toString();
-            const previewText = isLastMessageFromCurrentUser
-              ? `You: ${latestMessage.message_text}`
-              : latestMessage.message_text;
+            const isLastMessageUnsent = isMessageUnsent(latestMessage);
+            const previewText = isLastMessageUnsent
+              ? (isLastMessageFromCurrentUser
+                ? 'You unsent a message'
+                : 'Unsent a message')
+              : isLastMessageFromCurrentUser
+                ? `You: ${latestMessage.message_text}`
+                : latestMessage.message_text;
 
             shopsWithConversations.push({
               ...shop,
               lastMessage: previewText,
-              lastMessageTime: formatTime(latestMessage.created_at),
-              lastMessageTimestamp: new Date(latestMessage.created_at).getTime(),
+              lastMessageTime: formatTime(
+                isLastMessageUnsent && latestMessage.unsent_at
+                  ? latestMessage.unsent_at
+                  : latestMessage.created_at
+              ),
+              lastMessageTimestamp: new Date(
+                isLastMessageUnsent && latestMessage.unsent_at
+                  ? latestMessage.unsent_at
+                  : latestMessage.created_at
+              ).getTime(),
               hasUnreadMessages: effectiveUnreadMessages,
               unreadCount: effectiveUnreadCount,
             });
@@ -239,11 +276,18 @@ export default function MessagingScreen() {
       };
       
       socketService.onReceiveMessage(handleNewMessage);
+      const handleMessageUnsent = () => {
+        if (shops.length > 0) {
+          getShopsWithMessages(userId);
+        }
+      };
+      socketService.onMessageUnsent(handleMessageUnsent);
       
       // Cleanup function
       return () => {
         console.log('🧹 [CUSTOMER] Cleaning up MessagingScreen message listener');
         socketService.offReceiveMessage(handleNewMessage);
+        socketService.offMessageUnsent(handleMessageUnsent);
       };
     }
   }, [userId, userType, shops]);
@@ -463,14 +507,14 @@ export default function MessagingScreen() {
         colors={['#91e2d9', '#96bcff']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
-        style={[styles.headerContainer, { elevation: 4, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8 }]}
+        style={[styles.headerContainer, { elevation: 4, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, paddingHorizontal: isCompact ? 8 : 15, paddingBottom: isCompact ? 4 : 8 }]}
       >
         <View style={styles.headerSpacer} />
         <Text style={styles.headerTitle}>Messages</Text>
         <View style={styles.headerSpacer} />
       </LinearGradient>
 
-      <View style={styles.filterContainer}>
+      <View style={[styles.filterContainer, { marginHorizontal: isTablet ? 24 : 16 }]}>
         {renderFilterButton('All Chats')}
         {renderFilterButton('Recent')}
         {renderFilterButton('Unread', shopsWithMessages.filter(s => s.hasUnreadMessages).length)}
@@ -492,7 +536,7 @@ export default function MessagingScreen() {
             renderItem({ item: item as ShopWithLastMessage })
           )
         }
-        contentContainerStyle={{ padding: 16 }}
+        contentContainerStyle={{ padding: isTablet ? 20 : 16 }}
         refreshing={loading || messagesLoading}
         onRefresh={async () => {
           await refreshShops();
@@ -519,7 +563,6 @@ export default function MessagingScreen() {
   );
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const ANDROID_STATUSBAR = Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0;
 const styles = StyleSheet.create({
   headerContainer: {
@@ -527,8 +570,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: Platform.OS === 'android' ? ANDROID_STATUSBAR + 6 : 24,
-    paddingBottom: SCREEN_WIDTH < 370 ? 4 : 8,
-    paddingHorizontal: SCREEN_WIDTH < 370 ? 8 : 15,
+    paddingBottom: 8,
+    paddingHorizontal: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
@@ -544,7 +587,7 @@ const styles = StyleSheet.create({
     tintColor: '#fff',
   },
   headerTitle: {
-    fontSize: SCREEN_WIDTH < 370 ? 16 : 20,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',

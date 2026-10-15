@@ -1,6 +1,8 @@
 // hooks/useShops.ts
 import { useState, useEffect } from 'react';
 import { api } from '../config/api';
+import { isShopVisibleToCustomers } from '../utils/shopAvailability';
+import { getApiErrorMessage } from '../utils/getApiErrorMessage';
 
 interface Shop {
   shop_id: number;
@@ -24,15 +26,15 @@ export default function useShops() {
     try {
       setLoading(true);
       const response = await api.get('/shop');
-      // Customers may browse only approved/active shops.
+      // Include approved shops even when staff have temporarily closed them.
       const filtered = Array.isArray(response.data)
-        ? response.data.filter((s: Shop) => String(s.status || '').toLowerCase() === 'active')
+        ? response.data.filter((s: Shop) => isShopVisibleToCustomers(s.status))
         : [];
       setShops(filtered);
       setError(null);
     } catch (err: any) {
       console.log('Error fetching shops:', err.message);
-      setError('Failed to load shops');
+      setError(getApiErrorMessage(err, 'Failed to load shops.'));
     } finally {
       setLoading(false);
     }

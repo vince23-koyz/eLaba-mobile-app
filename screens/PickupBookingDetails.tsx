@@ -142,18 +142,26 @@ const PickupBookingDetails: React.FC<Props> = ({ route, navigation }) => {
         primary: true,
         onPress: async () => {
           try {
-            await api.patch(`${API_ENDPOINTS.BOOKINGS.BASE}/${booking.booking_id}/status`, {
+            const response = await api.patch(`${API_ENDPOINTS.BOOKINGS.BASE}/${booking.booking_id}/status`, {
               status: 'cancelled',
               customer_id: booking.customer_id,
             });
             await fetchDetails();
             if (isPaidGcash(booking)) {
+              const refundStatus = String(response.data?.refund?.status || '').toLowerCase();
+              const refundMessage = response.data?.refund_error || refundStatus === 'failed'
+                ? 'Your booking was cancelled, but the automatic refund failed to start. Check Refunds for its status.'
+                : refundStatus === 'succeeded'
+                  ? 'Your booking was cancelled and the GCash refund succeeded.'
+                  : refundStatus
+                    ? 'Your booking was cancelled and the automatic GCash refund is being processed. Check Refunds for its status.'
+                    : 'Your booking was cancelled. The system will handle the refund when the GCash payment is confirmed.';
               showAlert(
                 'Booking Cancelled',
-                'Your pickup booking has been cancelled. You paid this booking through GCash. Would you like to request a refund now?',
+                refundMessage,
                 [
-                  { text: 'Later', style: 'cancel', onPress: () => navigation.goBack() },
-                  { text: 'Request now', primary: true, onPress: () => navigation.navigate('Transaction', { initialTab: 'refunds' }) },
+                  { text: 'Done', style: 'cancel', onPress: () => navigation.goBack() },
+                  { text: 'View Refunds', primary: true, onPress: () => navigation.navigate('Transaction', { initialTab: 'refunds' }) },
                 ],
                 'success'
               );

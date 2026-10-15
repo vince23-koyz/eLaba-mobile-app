@@ -16,7 +16,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { RouteProp, useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { captureRef } from 'react-native-view-shot';
-import RNFS from 'react-native-fs';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { RootStackParamList } from '../../navigation/Navigator';
 
 
@@ -114,13 +114,13 @@ export default function BookingReceiptScreen({ route }: { route: BookingReceiptR
         result: 'tmpfile',
       });
 
-      const destDir = `${RNFS.DownloadDirectoryPath}/eLabaReceipts`;
-      await RNFS.mkdir(destDir);
       const filename = `receipt-${receiptNumber.toLowerCase().replace(/[^a-z0-9]/g, '-')}.png`;
-      const destination = `${destDir}/${filename}`;
-      await RNFS.copyFile(uri, destination);
+      await CameraRoll.save(uri, {
+        type: 'photo',
+        album: 'eLaba Receipts',
+      });
 
-      setSavedMessage('Receipt saved successfully to your gallery or downloads folder.');
+      setSavedMessage(`Receipt saved successfully as ${filename} in your Photos/Gallery.`);
       setShowSavedModal(true);
     } catch (error: any) {
       console.log('Save receipt error:', error);

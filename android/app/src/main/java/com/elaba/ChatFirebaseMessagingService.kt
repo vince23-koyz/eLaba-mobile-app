@@ -167,6 +167,8 @@ class ChatFirebaseMessagingService : FirebaseMessagingService() {
       .appendQueryParameter("receiver_type", data["receiver_type"])
       .appendQueryParameter("receiver_id", data["receiver_id"])
       .appendQueryParameter("shop_id", data["shop_id"])
+      .appendQueryParameter("shop_name", data["shop_name"])
+      .appendQueryParameter("shop_image_url", data["shop_image_url"])
       .appendQueryParameter("conversationId", conversationId)
       .build()
 

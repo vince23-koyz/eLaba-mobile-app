@@ -11,18 +11,34 @@ interface NotificationData {
   customerId?: string;
   adminId?: string;
   customerName?: string;
+  shop_name?: string;
+  shop_image_url?: string;
+}
+
+function getConversationParts(conversationId?: string) {
+  const match = conversationId?.match(/^shop_(.+?)_customer_(.+?)_admin_(.+)$/);
+  if (!match) return null;
+
+  return {
+    shopId: match[1],
+    customerId: match[2],
+    adminId: match[3],
+  };
 }
 
 export function handleNotificationNavigation(data: NotificationData) {
+  const conversationParts = getConversationParts(data.conversationId);
   const customerId =
     data.customerId ??
+    conversationParts?.customerId ??
     (data.sender_type === 'customer' ? data.sender_id : data.receiver_id);
-  const shopId = data.shop_id;
+  const shopId = data.shop_id ?? conversationParts?.shopId;
   const adminId =
     data.adminId ??
+    conversationParts?.adminId ??
     (data.receiver_type === 'admin' ? data.receiver_id : data.sender_id);
   const displayName =
-    data.customerName ?? data.sender_name ?? 'Chat';
+    data.customerName ?? data.shop_name ?? data.sender_name ?? 'Chat';
 
   if (!customerId || !shopId || !adminId) {
     console.warn('[notificationNavigation] Missing params, cannot navigate:', data);
@@ -32,11 +48,9 @@ export function handleNotificationNavigation(data: NotificationData) {
   navigate('Convo', {
     shopName: displayName,
     shopId: shopId.toString(),
-    receiverId:
-      data.sender_type === 'admin'
-        ? data.sender_id ?? ''
-        : data.receiver_id ?? '',
-    receiverType: data.sender_type === 'admin' ? 'admin' : 'customer',
-    avatar: null,
+    receiverId: adminId.toString(),
+    receiverType: 'admin',
+    avatar: data.shop_image_url ? { uri: data.shop_image_url } : null,
+    useCreativeIcon: !data.shop_image_url,
   });
 }

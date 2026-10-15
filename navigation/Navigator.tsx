@@ -25,15 +25,21 @@ import ConvoScreen from '../screens/Messaging/ConvoScreen';
 import WalkInBookingDetails from '../screens/WalkInBookingDetails.tsx';
 import PickupBookingDetails from '../screens/PickupBookingDetails';
 import RescheduleBooking from '../screens/RescheduleBooking.tsx';
-// @ts-ignore - sometimes TS resolution lags behind file creation
-import ChangePhoneNumber from '../screens/Auth/ChangePhoneNumber';
+import SettingsScreen from '../screens/SettingsScreen.tsx';
+import ChangePasswordScreen from '../screens/Auth/ChangePasswordScreen';
 
 export type RootStackParamList = {
   Welcome: undefined;
   Login: undefined;
   PasswordRecovery: undefined;
   Signup: undefined;
-  Home: undefined;
+  Home: {
+    screen?: 'Notification';
+    params?: {
+      notificationId?: string;
+      bookingId?: number;
+    };
+  } | undefined;
   Messaging: undefined;
   Convo: {
     shopName: string;
@@ -133,7 +139,8 @@ export type RootStackParamList = {
   WalkInBookingDetails: { bookingId: number };
   PickupBookingDetails: { bookingId: number };
   RescheduleBooking: { bookingId: number };
-  ChangePhoneNumber: undefined;
+  Settings: undefined;
+  ChangePassword: undefined;
 };
 import MyBookingScreen from '../screens/MyBookingScreen';
 
@@ -282,8 +289,13 @@ const Navigator = () => {
           options={{ headerShown: false }}
         />
         <Stack.Screen
-          name="ChangePhoneNumber"
-          component={ChangePhoneNumber}
+          name="Settings"
+          component={SettingsScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ChangePassword"
+          component={ChangePasswordScreen}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>

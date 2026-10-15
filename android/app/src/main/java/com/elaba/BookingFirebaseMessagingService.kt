@@ -44,8 +44,13 @@ class BookingFirebaseMessagingService : FirebaseMessagingService() {
 
     val intent = Intent(this, MainActivity::class.java).apply {
       flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-      action = Intent.ACTION_MAIN
-      addCategory(Intent.CATEGORY_LAUNCHER)
+      action = Intent.ACTION_VIEW
+      this.data = android.net.Uri.Builder()
+        .scheme("elaba")
+        .authority("notifications")
+        .appendQueryParameter("notificationId", data["notificationId"])
+        .appendQueryParameter("bookingId", data["bookingId"])
+        .build()
     }
 
     val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

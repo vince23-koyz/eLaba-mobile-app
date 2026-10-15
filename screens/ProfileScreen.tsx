@@ -1,4 +1,4 @@
-import { Image, StyleSheet, Text, TouchableOpacity, View, StatusBar, Dimensions, Modal } from 'react-native'
+import { Image, StyleSheet, Text, TouchableOpacity, View, StatusBar, Modal, useWindowDimensions } from 'react-native'
 import React, { useState, useCallback } from 'react'
 import LinearGradient from 'react-native-linear-gradient'
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -11,10 +11,11 @@ import socketService from '../services/socketService';
 
 import { RootStackParamList } from '../navigation/Navigator';
 
-const { height, width } = Dimensions.get('window');
-
 export default function ProfileScreen() {
+  const { width, height } = useWindowDimensions();
   const isCompactDevice = width < 390;
+  const isTablet = width >= 768;
+  const maxCardWidth = isTablet ? 560 : 420;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [customerName, setCustomerName] = useState<string | null>(null);
@@ -143,6 +144,10 @@ export default function ProfileScreen() {
     navigation.navigate('MyBookingScreen');
   };
 
+  const handleSettings = () => {
+    navigation.navigate('Settings');
+  };
+
   // Resolve profile image URL whether absolute (Cloudinary) or relative (/uploads/.. or filename only)
   const getProfileImageUrl = (): string | null => {
     if (!profilePicture) return null;
@@ -223,7 +228,7 @@ export default function ProfileScreen() {
         <TouchableOpacity
           activeOpacity={0.9}
           onPress={handleProfile}
-          style={[styles.profileCard, { width: width * 0.76, alignSelf: 'center', marginTop: 12 }]}
+          style={[styles.profileCard, { width: Math.min(width * 0.76, maxCardWidth), alignSelf: 'center', marginTop: 12 }]}
         >
           <View style={styles.profileIdentity}>
             <View style={[styles.profileAvatarLarge, { width: isCompactDevice ? 64 : 72, height: isCompactDevice ? 64 : 72, borderRadius: (isCompactDevice ? 64 : 72) / 2 }]}>
@@ -263,9 +268,9 @@ export default function ProfileScreen() {
         </TouchableOpacity>
 
         {/* Action Buttons */}
-        <View style={styles.actionsContainer}>
+        <View style={[styles.actionsContainer, { paddingHorizontal: isTablet ? 24 : 18, maxWidth: isTablet ? 760 : undefined, alignSelf: 'center', width: isTablet ? '100%' : '100%' }]}> 
           {/* My Orders Button */}
-          <TouchableOpacity onPress={handleMyOrder} style={[styles.actionButton, styles.ordersButton]}>
+          <TouchableOpacity onPress={handleMyOrder} style={[styles.actionButton, styles.ordersButton, { paddingVertical: isCompactDevice ? 12 : 14 }]}>
             <View style={styles.buttonContent}>
               <View style={[styles.iconContainer, { width: isCompactDevice ? 38 : 42, height: isCompactDevice ? 38 : 42, borderRadius: (isCompactDevice ? 38 : 42) / 2 }]}>
                 <Image source={require('../assets/img/icon/clothes-hanger.png')} style={[styles.buttonIcon, { width: isCompactDevice ? 18 : 20, height: isCompactDevice ? 18 : 20 }]} />
@@ -278,7 +283,7 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={handleHistory} style={[styles.actionButton, styles.historyButton]}>
+          <TouchableOpacity onPress={handleHistory} style={[styles.actionButton, styles.historyButton, { paddingVertical: isCompactDevice ? 12 : 14 }]}>
             <View style={styles.buttonContent}>
               <View style={[styles.iconContainer, { width: isCompactDevice ? 38 : 42, height: isCompactDevice ? 38 : 42, borderRadius: (isCompactDevice ? 38 : 42) / 2 }]}>
                 <Image source={require('../assets/img/icon/history-icon.png')} style={[styles.buttonIcon, { width: isCompactDevice ? 18 : 20, height: isCompactDevice ? 18 : 20 }]} />
@@ -291,7 +296,20 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={handleLogout} style={[styles.actionButton, styles.logoutButton]}>
+          <TouchableOpacity onPress={handleSettings} style={[styles.actionButton, styles.settingsButton, { paddingVertical: isCompactDevice ? 12 : 14 }]}>
+            <View style={styles.buttonContent}>
+              <View style={[styles.iconContainer, { width: isCompactDevice ? 38 : 42, height: isCompactDevice ? 38 : 42, borderRadius: (isCompactDevice ? 38 : 42) / 2 }]}>
+                <Image source={require('../assets/img/icon/visibility.png')} style={[styles.buttonIcon, { width: isCompactDevice ? 18 : 20, height: isCompactDevice ? 18 : 20 }]} />
+              </View>
+              <View style={styles.buttonTextContainer}>
+                <Text style={[styles.buttonTitle, { fontSize: isCompactDevice ? 15 : 16 }]}>Settings</Text>
+                <Text style={[styles.buttonSubtitle, { fontSize: isCompactDevice ? 10.5 : 12 }]}>Manage your account preferences</Text>
+              </View>
+              <Text style={[styles.chevron, { fontSize: 24 }]}>{'›'}</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleLogout} style={[styles.actionButton, styles.logoutButton, { paddingVertical: isCompactDevice ? 12 : 14 }]}>
             <View style={styles.buttonContent}>
               <View style={[styles.iconContainer, { width: isCompactDevice ? 38 : 42, height: isCompactDevice ? 38 : 42, borderRadius: (isCompactDevice ? 38 : 42) / 2 }]}>
                 <Image source={require('../assets/img/icon/logout-icon.png')} style={[styles.buttonIcon, { width: isCompactDevice ? 18 : 20, height: isCompactDevice ? 18 : 20 }]} />
@@ -373,7 +391,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     textAlign: 'center',
-    marginTop: Math.max(30, height * 0.08),
+    marginTop: 30,
     marginBottom: 14,
     letterSpacing: 0.3,
     textShadowColor: 'rgba(0, 0, 0, 0.12)',
@@ -516,6 +534,10 @@ const styles = StyleSheet.create({
   historyButton: {
     borderLeftWidth: 4,
     borderLeftColor: '#667eea',
+  },
+  settingsButton: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#16a085',
   },
   logoutButton: {
     borderLeftWidth: 4,

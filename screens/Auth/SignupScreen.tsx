@@ -5,6 +5,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  ActivityIndicator,
   KeyboardAvoidingView,
   TouchableWithoutFeedback,
   Keyboard,
@@ -32,6 +33,7 @@ export default function SignupScreen() {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [otpError, setOtpError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [resendCooldown, setResendCooldown] = useState<number>(0);
   const timerRef = useRef<number | null>(null);
   const otpRefs = useRef<Array<TextInput | null>>([]);
@@ -206,6 +208,7 @@ export default function SignupScreen() {
               primary: true,
               onPress: async () => {
                 setLoading(true);
+                setLoadingMessage('Sending verification code...');
                 try {
                   const res = await AuthService.requestOtp(phoneNumber);
                   if (res?.success) {
@@ -225,6 +228,7 @@ export default function SignupScreen() {
                   }
                 } finally {
                   setLoading(false);
+                  setLoadingMessage('');
                 }
               },
             },
@@ -238,6 +242,7 @@ export default function SignupScreen() {
           return;
         }
         setLoading(true);
+        setLoadingMessage('Verifying your code...');
         const res = await AuthService.verifyOtp(phoneNumber, otpCode);
         if (res?.success) {
           setStep('password');
@@ -261,6 +266,7 @@ export default function SignupScreen() {
           return;
         }
         setLoading(true);
+        setLoadingMessage('Creating your account...');
         const response = await AuthService.registerCustomer({
           first_name: toTitleCase(firstName),
           last_name: toTitleCase(lastName),
@@ -291,6 +297,7 @@ export default function SignupScreen() {
       }
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -298,6 +305,7 @@ export default function SignupScreen() {
     try {
       if (resendCooldown > 0) return;
       setLoading(true);
+      setLoadingMessage('Sending verification code...');
       const res = await AuthService.requestOtp(phoneNumber);
       if (res?.success) {
         showAlert('OTP resent', 'Please check your phone for the new code.', undefined, 'success');
@@ -310,6 +318,7 @@ export default function SignupScreen() {
       showAlert('Error', 'Could not resend OTP.', undefined, 'error');
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -514,6 +523,15 @@ export default function SignupScreen() {
           </ScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+      {loading && (
+        <View style={styles.loadingOverlay} accessibilityRole="progressbar">
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="large" color="#2b7ecb" />
+            <Text style={styles.loadingTitle}>{loadingMessage || 'Please wait...'}</Text>
+            <Text style={styles.loadingDescription}>This may take a few seconds.</Text>
+          </View>
+        </View>
+      )}
     </LinearGradient>
   );
 }
@@ -682,4 +700,33 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   submitButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  loadingCard: {
+    width: '78%',
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: 'center',
+    elevation: 8,
+  },
+  loadingTitle: {
+    color: '#263238',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  loadingDescription: {
+    color: '#6b7280',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
+  },
 });

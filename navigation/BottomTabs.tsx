@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Image, Text, StyleSheet } from 'react-native';
+import { View, Image, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import HomeScreen from '../screens/HomeScreen';
@@ -15,6 +15,8 @@ import useUnreadMessages from '../hook/useUnreadMessages';
 const Tab = createBottomTabNavigator();
 
 export default function BottomTabs() {
+  const { width } = useWindowDimensions();
+  const isTablet = width >= 768;
   const { count } = useNotificationCount();
   const [customerId, setCustomerId] = useState<string | null>(null);
   const { unreadCount, refreshUnreadMessages } = useUnreadMessages(customerId || '', 'customer');
@@ -44,7 +46,7 @@ export default function BottomTabs() {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarStyle: styles.tabBarStyle,
+        tabBarStyle: [styles.tabBarStyle, { height: isTablet ? 92 : 80, left: Math.min(width * 0.06, 24), right: Math.min(width * 0.06, 24) }],
         tabBarIcon: ({ focused }) => {
           let iconPath;
           let label;
@@ -75,11 +77,11 @@ export default function BottomTabs() {
                   source={iconPath}
                   style={[
                     styles.iconImage,
-                    { tintColor: focused ? '#3ec6ff' : '#595959' },
+                    { tintColor: focused ? '#3ec6ff' : '#595959', width: isTablet ? 30 : 26, height: isTablet ? 30 : 26 },
                   ]}
                 />
               </View>
-              <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>
+              <Text style={[styles.iconLabel, focused && styles.iconLabelActive, isTablet && styles.iconLabelTablet]}>
                 {label}
               </Text>
 
@@ -133,6 +135,9 @@ const styles = StyleSheet.create({
   iconImage: {
     width: 26,
     height: 26,
+  },
+  iconLabelTablet: {
+    fontSize: 11,
   },
   iconLabel: {
     fontSize: 10,

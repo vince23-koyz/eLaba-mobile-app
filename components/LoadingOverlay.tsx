@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Modal, View, Text, StyleSheet, Animated, Image, Dimensions } from 'react-native';
+import { Modal, View, Text, StyleSheet, Animated, Image, useWindowDimensions } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 
 type Props = {
@@ -8,9 +8,8 @@ type Props = {
   subtitle?: string;
 };
 
-const { width } = Dimensions.get('window');
-
 const LoadingOverlay: React.FC<Props> = ({ visible, title = 'Loading', subtitle = 'Please wait…' }) => {
+  const { width } = useWindowDimensions();
   const spinAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -38,7 +37,7 @@ const LoadingOverlay: React.FC<Props> = ({ visible, title = 'Loading', subtitle 
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={styles.overlay}>
-        <View style={styles.card}>
+        <View style={[styles.card, { width: Math.min(width * 0.78, 340) }]}>
           <View style={styles.spinnerWrapper}>
             <LinearGradient colors={["#6bd1c5", "#356dc1"]} style={styles.spinnerBg}>
               <Animated.View style={[styles.logoWrapper, { transform: [{ rotate: spin }] }]}>
@@ -63,7 +62,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   card: {
-    width: Math.min(width * 0.78, 340),
     minHeight: 210,
     backgroundColor: '#fff',
     borderRadius: 24,

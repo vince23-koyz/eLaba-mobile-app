@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, View, Text, StyleSheet, Pressable, GestureResponderEvent, Platform } from 'react-native';
+import { Modal, View, Text, StyleSheet, Pressable, GestureResponderEvent, Platform, useWindowDimensions } from 'react-native';
 import Icons from './Icons';
 
 export type AlertAction = {
@@ -29,6 +29,7 @@ const typeStyles: Record<AlertType, { accent: string; tint: string }> = {
 };
 
 export default function CustomAlertModal({ visible, title, message, type = 'info', actions, onRequestClose }: Props) {
+  const { width } = useWindowDimensions();
   const palette = typeStyles[type] || typeStyles.info;
   const finalActions: AlertAction[] = actions && actions.length > 0
     ? actions
@@ -44,7 +45,7 @@ export default function CustomAlertModal({ visible, title, message, type = 'info
       onRequestClose={type === 'success' || type === 'confirm' ? () => undefined : onRequestClose}
     >
       <View style={styles.backdrop}>
-        <View style={styles.card}>
+        <View style={[styles.card, { width: Math.min(width - 32, 380) }]}>
           <View style={[styles.iconWrap, { backgroundColor: palette.tint }]}>
             {renderTypeIcon(type, palette.accent)}
           </View>

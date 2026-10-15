@@ -7,17 +7,17 @@ import {
   TouchableOpacity,
   StatusBar,
   Animated,
-  Dimensions,
   SafeAreaView,
+  useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/Navigator';
 
-const { height } = Dimensions.get('window');
-
 const WelcomeScreen: React.FC = () => {
+  const { width, height } = useWindowDimensions();
+  const isTablet = width >= 768;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   
   // Animation refs
@@ -102,11 +102,11 @@ const WelcomeScreen: React.FC = () => {
     >
       <StatusBar barStyle="dark-content" backgroundColor="#a6c1ee" />
       
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={[styles.safeArea, { paddingHorizontal: isTablet ? 40 : 24 }]}>
         {/* Decorative Elements */}
         <View style={styles.decorativeContainer}>
           <View style={[styles.decorativeCircle, styles.circle1]} />
-          <View style={[styles.decorativeCircle, styles.circle2]} />
+          <View style={[styles.decorativeCircle, styles.circle2, { top: height * 0.3 }]} />
           <View style={[styles.decorativeCircle, styles.circle3]} />
         </View>
 
@@ -131,7 +131,7 @@ const WelcomeScreen: React.FC = () => {
             ]}
           >
             <View style={styles.logoWrapper}>
-              <Image source={require('../../assets/img/elaba.png')} style={styles.image} />
+              <Image source={require('../../assets/img/elaba.png')} style={[styles.image, { width: isTablet ? 160 : 120, height: isTablet ? 160 : 120 }]} />
               <View style={styles.logoShadow} />
             </View>
             
@@ -141,8 +141,8 @@ const WelcomeScreen: React.FC = () => {
                 opacity: fadeAnim,
               }}
             >
-              <Text style={styles.welcome}>Welcome to eLaba</Text>
-              <Text style={styles.subtitle}>Laundry Booking Services</Text>
+              <Text style={[styles.welcome, { fontSize: isTablet ? 42 : 32 } ]}>Welcome to eLaba</Text>
+              <Text style={[styles.subtitle, { fontSize: isTablet ? 22 : 18 } ]}>Laundry Booking Services</Text>
             </Animated.View>
           </Animated.View>
 
@@ -171,15 +171,15 @@ const WelcomeScreen: React.FC = () => {
           ]}
         >
           <TouchableOpacity 
-            style={styles.button} 
+            style={[styles.button, { width: isTablet ? 320 : '100%', maxWidth: 360 }]} 
             onPress={handleGetStarted}
             activeOpacity={0.8}
           >
             <LinearGradient
               colors={['#ffffff', '#f8f9fa']}
-              style={styles.buttonGradient}
+              style={[styles.buttonGradient, { paddingVertical: isTablet ? 20 : 18, paddingHorizontal: isTablet ? 56 : 40 }]}
             >
-              <Text style={styles.buttonText}>Get Started</Text>
+              <Text style={[styles.buttonText, { fontSize: isTablet ? 20 : 18 }]}>Get Started</Text>
             </LinearGradient>
           </TouchableOpacity>
           
@@ -224,7 +224,6 @@ const styles = StyleSheet.create({
   circle2: {
     width: 120,
     height: 120,
-    top: height * 0.3,
     left: -30,
   },
   circle3: {

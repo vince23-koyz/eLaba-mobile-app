@@ -17,8 +17,10 @@ import { WebView } from 'react-native-webview';
 import { api, API_ENDPOINTS } from '../../config/api';
 import paymongoService from '../../services/paymongoService';
 import { AlertAction, AlertType } from '../../components/CustomAlertModal';
+import LoadingOverlay from '../../components/LoadingOverlay';
 import { useAlert } from '../../context/AlertContext';
 import { isServiceAvailableForBooking } from '../../utils/serviceAvailability';
+import { isShopOpenForBookings } from '../../utils/shopAvailability';
 
 
 type BookingServiceNavProp = NativeStackNavigationProp<RootStackParamList, 'BookingService'>;
@@ -196,6 +198,19 @@ export default function BookingScreen({ route }: { route: BookingServiceRoutePro
         undefined,
         'warning'
       );
+      return;
+    }
+
+    try {
+      const { data: shopData } = await api.get(`/shop/${shop_id}`);
+      const currentShop = shopData?.shop || shopData;
+      if (!isShopOpenForBookings(currentShop?.status)) {
+        showAlert('Shop Closed', 'This shop is currently closed and cannot accept bookings.', undefined, 'warning');
+        return;
+      }
+    } catch (error) {
+      console.warn('Unable to verify shop availability:', error);
+      showAlert('Shop Unavailable', 'Unable to verify this shop right now. Please try again.', undefined, 'warning');
       return;
     }
 
@@ -672,6 +687,15 @@ useFocusEffect(
           </LinearGradient>
         </TouchableOpacity>
       </View>
+      <LoadingOverlay
+        visible={loading || isCheckingStatus}
+        title={isCheckingStatus ? 'Verifying GCash payment' : 'Preparing GCash payment'}
+        subtitle={
+          isCheckingStatus
+            ? 'Please wait while we confirm your transaction.'
+            : 'Please wait while we connect to GCash.'
+        }
+      />
     </SafeAreaView>
   );
 }

@@ -5,10 +5,10 @@ import axios from 'axios';
 
 // const DEFAULT_BASE_ORIGIN = 'http://localhost:5000';        // iOS simulator / local
 //const DEFAULT_BASE_ORIGIN = 'http://10.0.2.2:5000';         // Android emulator
- const DEFAULT_BASE_ORIGIN = 'http://91.108.121.176:5000';       // Hostinger VPS, no domain yet
+const DEFAULT_BASE_ORIGIN = 'https://api.elaba.tech';      // Hostinger VPS
 
 // Fallback origins used for recovery when primary origin is unreachable (dev only)
-export const FALLBACK_ORIGINS = [
+export const FALLBACK_ORIGINS = [ 
   'http://10.0.2.2:5000',
   'http://localhost:5000',
 ];
@@ -46,6 +46,7 @@ export const API_ENDPOINTS = {
   },
   CUSTOMERS: {
     BASE: '/customers',
+    CHANGE_PASSWORD: '/customers/change-password',
     FORGOT_PASSWORD: '/customers/forgot-password',
     VERIFY_OTP: '/customers/verify-otp',
     BY_ID: (id) => `/customers/${id}`,
@@ -71,7 +72,7 @@ export const API_ENDPOINTS = {
       CREATE: '/payments/gcash/create',
       STATUS: (paymentIntentId) => `/payments/gcash/status/${paymentIntentId}`,
     },
-    REFUNDS: '/payments/refunds',
+    REFUND_STATUS: (bookingId, customerId) => `/payments/refunds/booking/${bookingId}/status?customer_id=${customerId}`,
   },
   MESSAGES: {
     MARK_READ: '/messages/mark-read',

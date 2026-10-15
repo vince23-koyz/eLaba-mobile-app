@@ -39,7 +39,6 @@ export default function TransactionHistory() {
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'history' | 'refunds'>(route.params?.initialTab || 'history');
-  const [refundProcessingId, setRefundProcessingId] = useState<number | null>(null);
   const shimmerAnim = useRef(new Animated.Value(0)).current;
   const shimmerTranslate = shimmerAnim.interpolate({
     inputRange: [0, 1],
@@ -66,14 +65,36 @@ export default function TransactionHistory() {
     ).start();
   }, [shimmerAnim]);
 
-  const fetchOrders = useCallback(async () => {
+  const fetchOrders = useCallback(async (showLoading = true) => {
     if (!customerId) return;
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       setError(null);
       const res = await api.get(API_ENDPOINTS.BOOKINGS.BASE, { params: { customer_id: customerId } });
       const list: Order[] = Array.isArray(res.data) ? res.data : [];
-      setOrders(list.filter(order => (order.booking_status || '').trim().toLowerCase() !== 'pending'));
+      const visibleOrders = list.filter(order => (order.booking_status || '').trim().toLowerCase() !== 'pending');
+      const refundsToSync = visibleOrders.filter(order =>
+        order.refund_id && ['pending', 'processing'].includes((order.refund_status || '').toLowerCase())
+      );
+      const syncResults = await Promise.all(refundsToSync.map(async order => {
+        try {
+          const statusResponse = await api.get(
+            API_ENDPOINTS.PAYMENTS.REFUND_STATUS(order.booking_id, customerId)
+          );
+          return { bookingId: order.booking_id, status: statusResponse.data?.refund?.status };
+        } catch {
+          return null;
+        }
+      }));
+      const syncedStatuses = new Map(
+        syncResults
+          .filter((result): result is { bookingId: number; status: string } => Boolean(result?.status))
+          .map(result => [result.bookingId, result.status])
+      );
+      setOrders(visibleOrders.map(order => ({
+        ...order,
+        refund_status: syncedStatuses.get(order.booking_id) || order.refund_status,
+      })));
       if (!Array.isArray(res.data)) {
         setError('Failed to load transactions');
       }
@@ -81,13 +102,23 @@ export default function TransactionHistory() {
       setOrders([]);
       setError('Failed to load transactions');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [customerId]);
 
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    const hasActiveRefund = orders.some(order =>
+      ['pending', 'processing'].includes((order.refund_status || '').toLowerCase())
+    );
+    if (activeTab !== 'refunds' || !hasActiveRefund) return;
+
+    const intervalId = setInterval(() => fetchOrders(false), 12000);
+    return () => clearInterval(intervalId);
+  }, [activeTab, fetchOrders, orders]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -138,22 +169,6 @@ export default function TransactionHistory() {
     (order.payment_method || '').toLowerCase() === 'gcash' &&
     ['paid', 'success', 'succeeded', 'completed'].includes((order.payment_status || '').toLowerCase())
   );
-
-  const requestRefund = async (order: Order) => {
-    if (!customerId) return;
-    setRefundProcessingId(order.booking_id);
-    try {
-      await api.post(API_ENDPOINTS.PAYMENTS.REFUNDS, {
-        booking_id: order.booking_id,
-        customer_id: customerId,
-      });
-      await fetchOrders();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Unable to submit refund request');
-    } finally {
-      setRefundProcessingId(null);
-    }
-  };
 
   return (
     <ScrollView
@@ -236,12 +251,12 @@ export default function TransactionHistory() {
           ) : activeTab === 'refunds' ? (
             refundableOrders.length === 0 ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyTitle}>No refund requests</Text>
-                <Text style={styles.emptyText}>Cancelled paid GCash bookings will appear here.</Text>
+                <Text style={styles.emptyTitle}>No refunds yet</Text>
+                <Text style={styles.emptyText}>Refunds for cancelled paid GCash bookings will appear here.</Text>
               </View>
             ) : refundableOrders.map((order) => {
               const refundStatus = (order.refund_status || '').toLowerCase();
-              const hasRefundRequest = ['pending', 'processing', 'succeeded'].includes(refundStatus);
+              const hasRefundRecord = ['pending', 'processing', 'succeeded', 'failed'].includes(refundStatus);
               return (
                 <View key={order.booking_id} style={styles.refundCard}>
                   <View style={styles.shopHeaderFull}>
@@ -254,14 +269,14 @@ export default function TransactionHistory() {
                       <Text style={styles.service}>{order.service_name || 'Laundry service'}</Text>
                       <Text style={styles.total}>{formatAmount(order.total_amount)}</Text>
                     </View>
-                    {hasRefundRequest ? (
+                    {hasRefundRecord ? (
                       <View style={styles.refundStatusBox}>
                         <Text style={styles.refundStatusText}>{refundStatus === 'succeeded' ? 'REFUNDED' : `REFUND ${refundStatus.toUpperCase()}`}</Text>
                       </View>
                     ) : (
-                      <TouchableOpacity disabled={refundProcessingId === order.booking_id} onPress={() => requestRefund(order)} style={styles.refundButton}>
-                        <Text style={styles.refundButtonText}>{refundProcessingId === order.booking_id ? 'Submitting...' : 'Request Refund'}</Text>
-                      </TouchableOpacity>
+                      <View style={styles.refundStatusBox}>
+                        <Text style={styles.refundStatusText}>REFUND STATUS UPDATING</Text>
+                      </View>
                     )}
                   </View>
                 </View>
@@ -595,17 +610,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.4,
-  },
-  refundButton: {
-    backgroundColor: '#2d79d1',
-    borderRadius: 8,
-    padding: 13,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  refundButtonText: {
-    color: '#ffffff',
-    fontWeight: '800',
   },
   refundStatusBox: {
     backgroundColor: '#eff6ff',

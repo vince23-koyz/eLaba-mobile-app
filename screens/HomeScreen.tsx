@@ -2,6 +2,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import {
   Animated,
+  Alert,
   StyleSheet,
   Text,
   View,
@@ -13,7 +14,7 @@ import {
   RefreshControl,
   BackHandler,
   ToastAndroid,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useNavigation, useIsFocused } from '@react-navigation/native';
@@ -21,27 +22,24 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/Navigator';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-
 import ShopCard from '../components/ShopCard';
 import useShops from '../hook/useShops';
 import { api, API_ENDPOINTS, API_CONFIG } from '../config/api';
-
-// Fisher-Yates shuffle
-function shuffleArray<T>(array: T[]): T[] {
-  const arr = array.slice();
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-
-const { width } = Dimensions.get('window');
+import { getResponsiveValue } from '../utils/responsive';
+import { getApiErrorMessage } from '../utils/getApiErrorMessage';
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export default function HomeScreen() {
+  const { width, height } = useWindowDimensions();
+  const isTablet = width >= 768;
+  const isLandscape = width > height;
+  const headerPaddingHorizontal = getResponsiveValue(width, 16, 20, 24, 28);
+  const appIconSize = getResponsiveValue(width, 34, 40, 44, 48);
+  const avatarSize = getResponsiveValue(width, 38, 42, 46, 48);
+  const cardWidth = getResponsiveValue(width, 76, 90, 104, 120);
+  const cardHeight = getResponsiveValue(width, 92, 110, 122, 130);
+  const cardImageSize = getResponsiveValue(width, 42, 50, 56, 60);
   const scrollRef = useRef<ScrollView>(null);
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const isFocused = useIsFocused();
@@ -55,14 +53,90 @@ export default function HomeScreen() {
   });
 
   const { shops, loading, error, refresh } = useShops();
-  // Randomize shops order for display
-  const [randomizedShops, setRandomizedShops] = useState<typeof shops>([]);
 
   const [customerName, setCustomerName] = useState<string | null>(null);
   const [customerLastName, setCustomerLastName] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
+  const [favoriteShopIds, setFavoriteShopIds] = useState<Set<number>>(new Set());
+  const favoriteShopIdsRef = useRef(new Set<number>());
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [imageKey, setImageKey] = useState(Date.now());
+
+  const sortedShops = [...shops].sort((a, b) => {
+    const favoriteOrder = Number(favoriteShopIds.has(b.shop_id)) - Number(favoriteShopIds.has(a.shop_id));
+    return favoriteOrder || (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+  });
+
+  useEffect(() => {
+    let isCurrentCustomer = true;
+
+    const loadFavorites = async () => {
+      setFavoritesLoaded(false);
+      if (!customerId) {
+        favoriteShopIdsRef.current = new Set();
+        setFavoriteShopIds(new Set());
+        setFavoritesLoaded(true);
+        return;
+      }
+
+      try {
+        const savedFavorites = await AsyncStorage.getItem(`favoriteShops_${customerId}`);
+        const parsedFavorites: unknown = savedFavorites ? JSON.parse(savedFavorites) : [];
+        if (
+          !Array.isArray(parsedFavorites) ||
+          !parsedFavorites.every((id): id is number => typeof id === 'number' && Number.isInteger(id))
+        ) {
+          throw new Error('Saved favorite shop data is invalid');
+        }
+        if (isCurrentCustomer) {
+          const favorites = new Set(parsedFavorites);
+          favoriteShopIdsRef.current = favorites;
+          setFavoriteShopIds(favorites);
+        }
+      } catch (error) {
+        console.error('Error loading favorite shops:', error);
+        if (isCurrentCustomer) {
+          favoriteShopIdsRef.current = new Set();
+          setFavoriteShopIds(favoriteShopIdsRef.current);
+        }
+      } finally {
+        if (isCurrentCustomer) {
+          setFavoritesLoaded(true);
+        }
+      }
+    };
+
+    void loadFavorites();
+    return () => {
+      isCurrentCustomer = false;
+    };
+  }, [customerId]);
+
+  const toggleFavorite = async (shopId: number) => {
+    if (!customerId || !favoritesLoaded) {
+      return;
+    }
+
+    const updatedFavorites = new Set(favoriteShopIdsRef.current);
+    if (updatedFavorites.has(shopId)) {
+      updatedFavorites.delete(shopId);
+    } else {
+      updatedFavorites.add(shopId);
+    }
+    favoriteShopIdsRef.current = updatedFavorites;
+    setFavoriteShopIds(updatedFavorites);
+
+    try {
+      await AsyncStorage.setItem(
+        `favoriteShops_${customerId}`,
+        JSON.stringify([...updatedFavorites]),
+      );
+    } catch (error) {
+      console.error('Error saving favorite shop:', error);
+      Alert.alert('Favorites unavailable', 'Could not save this shop as a favorite. Please try again.');
+    }
+  };
 
   useEffect(() => {
     const loadCustomerName = async () => {
@@ -89,7 +163,7 @@ export default function HomeScreen() {
               setImageKey(Date.now());
             }
           } catch (error) {
-            console.log('Error loading customer profile image for home header:', error);
+            console.log('Error loading customer profile image for home header:', getApiErrorMessage(error, 'Unable to load profile image.'));
           }
         }
       } catch (e) {
@@ -156,15 +230,6 @@ export default function HomeScreen() {
     }
   }, [isFocused, firstLoad]);
 
-  // Shuffle shops whenever shops data changes
-  useEffect(() => {
-    if (shops && shops.length > 0) {
-      setRandomizedShops(shuffleArray(shops));
-    } else {
-      setRandomizedShops([]);
-    }
-  }, [shops]);
-
   useEffect(() => {
     shimmerAnim.setValue(0);
     Animated.loop(
@@ -218,50 +283,50 @@ useEffect(() => {
           }
         >
           {/* HEADER */}
-          <View style={styles.header}>
+          <View style={[styles.header, { paddingHorizontal: headerPaddingHorizontal, paddingTop: isLandscape ? 20 : 50 }]}> 
             <View style={styles.headerContent}>
               <View style={styles.leftContainer}>
-                <Image source={require('../assets/img/elaba.png')} style={styles.appIcon} />
-                <Text style={styles.headerTitle}>eLaba</Text>
+                <Image source={require('../assets/img/elaba.png')} style={[styles.appIcon, { width: appIconSize, height: appIconSize }]} />
+                <Text style={[styles.headerTitle, { fontSize: isTablet ? 28 : 22 }]}>eLaba</Text>
               </View>
-              <TouchableOpacity onPress={handleProfile} style={styles.profileAvatarButton}>
+              <TouchableOpacity onPress={handleProfile} style={[styles.profileAvatarButton, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}>
                 {profilePicture ? (
                   <Image
                     key={`home-header-avatar-${profilePicture}-${imageKey}`}
                     source={{ uri: getProfileImageUrl() || undefined, cache: 'reload' as any }}
-                    style={styles.profileAvatarImage}
+                    style={[styles.profileAvatarImage, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
                     resizeMode="cover"
                     onError={() => setProfilePicture(null)}
                   />
                 ) : (
-                  <View style={styles.profileAvatarFallback}>
-                    <Text style={styles.profileAvatarText}>{getInitials(customerName, customerLastName)}</Text>
+                  <View style={[styles.profileAvatarFallback, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}>
+                    <Text style={[styles.profileAvatarText, { fontSize: isTablet ? 16 : 15 }]}>{getInitials(customerName, customerLastName)}</Text>
                   </View>
                 )}
               </TouchableOpacity>
             </View>
 
             <View style={styles.rectangleLine}>
-              <Text style={styles.welcomeText}>
+              <Text style={[styles.welcomeText, { fontSize: isTablet ? 26 : 20 }]}> 
                 {customerName
                   ? `Hello, ${customerName}`
                   : 'Hello, Guest'}
               </Text>
             </View>
 
-            <Text style={styles.welcomeText}>
+            <Text style={[styles.welcomeText, { fontSize: isTablet ? 22 : 20, marginTop: 12 }]}>
               Welcome! Find the best deals at your favorite laundry shops
             </Text>
 
-            <View style={styles.cardContainer}>
+            <View style={[styles.cardContainer, { marginTop: 20, gap: isTablet ? 16 : 8, justifyContent: isTablet ? 'center' : 'space-around' }]}> 
               {[
                 { icon: require('../assets/img/dry.png'), label: 'Dry Clean' },
                 { icon: require('../assets/img/wash.png'), label: 'Wash' },
                 { icon: require('../assets/img/iron.png'), label: 'Iron' },
               ].map((item, index) => (
-                <View key={index} style={[styles.card, styles.cardStatic]} pointerEvents="none">
-                  <Image source={item.icon} style={styles.cardImage} />
-                  <Text style={styles.cardText}>{item.label}</Text>
+                <View key={index} style={[styles.card, styles.cardStatic, { width: cardWidth, height: cardHeight }]} pointerEvents="none">
+                  <Image source={item.icon} style={[styles.cardImage, { width: cardImageSize, height: cardImageSize }]} />
+                  <Text style={[styles.cardText, { fontSize: isTablet ? 15 : 13 }]}>{item.label}</Text>
                 </View>
               ))}
             </View>
@@ -269,8 +334,8 @@ useEffect(() => {
           </View>
 
           {/* SECTION LABEL */}
-          <View style={styles.selectContainer}>
-            <Text style={styles.selectText}>Select Laundry Shops</Text>
+          <View style={[styles.selectContainer, { marginTop: isTablet ? 34 : 30 }]}> 
+            <Text style={[styles.selectText, { fontSize: isTablet ? 22 : 18 }]}>Select Laundry Shops</Text>
           </View>
 
           {/* SHOP CARDS */}
@@ -278,7 +343,7 @@ useEffect(() => {
 
           {loading ? (
             Array.from({ length: 3 }).map((_, index) => (
-              <View key={`shop-skeleton-${index}`} style={styles.shopSkeletonCard}>
+              <View key={`shop-skeleton-${index}`} style={[styles.shopSkeletonCard, { width: Math.min(width * 0.9, 480) }]}>
                 <View style={styles.shopSkeletonBanner}>
                   <Animated.View
                     style={[
@@ -316,13 +381,16 @@ useEffect(() => {
           ) : shops.length === 0 ? (
             <Text style={{ textAlign: 'center', marginTop: 10 }}>No shops available.</Text>
           ) : (
-            randomizedShops.map((shop) => (
+            sortedShops.map((shop) => (
               <ShopCard
                 key={shop.shop_id}
                 name={shop.name}
                 address={shop.address}
                 logo={shop.logo}
                 status={shop.status as any}
+                isFavorite={favoriteShopIds.has(shop.shop_id)}
+                favoriteDisabled={!favoritesLoaded || !customerId}
+                onToggleFavorite={() => toggleFavorite(shop.shop_id)}
                 onPress={() => navigation.navigate('ShopDetails', { shop_id: shop.shop_id })}
               />
             ))
@@ -461,7 +529,8 @@ const styles = StyleSheet.create({
   selectContainer: { alignItems: 'center', marginTop: 30 },
   selectText: { color: '#221f1f', fontSize: 18, fontWeight: '600' },
   shopSkeletonCard: {
-    width: width * 0.90,
+    width: '90%',
+    maxWidth: 480,
     alignSelf: 'center',
     borderRadius: 20,
     backgroundColor: '#ffffff',

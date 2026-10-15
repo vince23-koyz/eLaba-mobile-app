@@ -1,26 +1,44 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Image, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, useWindowDimensions, GestureResponderEvent } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { Heart } from 'lucide-react-native';
 import { API_CONFIG } from '../config/api';
+import { getResponsiveValue } from '../utils/responsive';
+import { isShopOpenForBookings } from '../utils/shopAvailability';
 
 interface ShopCardProps {
   name: string;
   address?: string; 
   logo?: string; // Shop banner/logo
   status?: 'active' | 'inactive' | 'pending' | string; // backend status; pending will be filtered out upstream
+  isFavorite?: boolean;
+  favoriteDisabled?: boolean;
+  onToggleFavorite?: () => void;
   onPress: () => void;
 }
 
-const { width } = Dimensions.get('window');
-
-export default function ShopCard({ name, address, logo, status, onPress }: ShopCardProps) {
+export default function ShopCard({
+  name,
+  address,
+  logo,
+  status,
+  isFavorite = false,
+  favoriteDisabled = false,
+  onToggleFavorite,
+  onPress,
+}: ShopCardProps) {
+  const { width } = useWindowDimensions();
+  const cardWidth = Math.min(width * 0.9, 480);
+  const bannerHeight = getResponsiveValue(width, 120, 136, 148, 172);
+  const buttonPadding = getResponsiveValue(width, 8, 10, 12, 14);
   // Construct logo URL: if already absolute, use as-is; else prefix backend base
   const logoUrl = logo
     ? (logo.startsWith('http') ? logo : `${API_CONFIG.BASE_ORIGIN}${logo}`)
     : null;
 
-  // Status indicator mapping
-  const isActive = status === 'active' || !status; // default to active if not provided
+  // Status indicator mapping: customer-facing labels should be Open/Closed,
+  // even if the backend internally stores the status as active/inactive.
+  const isActive = isShopOpenForBookings(status);
   const indicatorBg = isActive ? 'rgba(76, 175, 80, 0.9)' : 'rgba(239, 68, 68, 0.9)';
   const indicatorText = isActive ? 'Open' : 'Closed';
   const glowAnim = useRef(new Animated.Value(0)).current;
@@ -52,12 +70,12 @@ export default function ShopCard({ name, address, logo, status, onPress }: ShopC
 
   return (
     <TouchableOpacity 
-      style={styles.shopCard} 
+      style={[styles.shopCard, { width: cardWidth }]} 
       onPress={onPress} 
       activeOpacity={0.8}
     >
       {/* Banner Section at the Top */}
-      <View style={styles.bannerSection}>
+      <View style={[styles.bannerSection, { height: bannerHeight }]}>
         {logoUrl ? (
           <>
             <Image source={{ uri: logoUrl }} style={styles.bannerLogo} resizeMode="cover" />
@@ -100,16 +118,22 @@ export default function ShopCard({ name, address, logo, status, onPress }: ShopC
         )}
         
         {/* Enhanced Book Button */}
-        <TouchableOpacity style={styles.bookButton} onPress={onPress}>
-          <LinearGradient
-            colors={['#4facfe', '#00f2fe']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.bookButtonGradient}
+        {isActive && (
+          <TouchableOpacity
+            style={[styles.bookButton, { paddingHorizontal: buttonPadding, paddingVertical: buttonPadding * 0.7 }]}
+            onPress={onPress}
+            activeOpacity={0.8}
           >
-            <Text style={styles.bookButtonText}>Book</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+            <LinearGradient
+              colors={['#4facfe', '#00f2fe']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.bookButtonGradient}
+            >
+              <Text style={styles.bookButtonText}>Book</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
         
         {/* Status indicator */}
         <Animated.View
@@ -142,6 +166,26 @@ export default function ShopCard({ name, address, logo, status, onPress }: ShopC
             <Text style={styles.shopName} numberOfLines={1} ellipsizeMode="tail">
               {name}
             </Text>
+            {onToggleFavorite && (
+              <TouchableOpacity
+                style={styles.favoriteButton}
+                onPress={(event: GestureResponderEvent) => {
+                  event.stopPropagation();
+                  onToggleFavorite();
+                }}
+                disabled={favoriteDisabled}
+                accessibilityRole="button"
+                accessibilityLabel={`${isFavorite ? 'Remove' : 'Add'} ${name} ${isFavorite ? 'from' : 'to'} favorites`}
+                accessibilityState={{ disabled: favoriteDisabled, selected: isFavorite }}
+              >
+                <Heart
+                  size={22}
+                  color="#ef4444"
+                  fill={isFavorite ? '#ef4444' : 'transparent'}
+                  strokeWidth={2.2}
+                />
+              </TouchableOpacity>
+            )}
           </View>
           
           {address && (
@@ -170,7 +214,6 @@ export default function ShopCard({ name, address, logo, status, onPress }: ShopC
 
 const styles = StyleSheet.create({
   shopCard: {
-    width: width * 0.90,
     alignSelf: 'center',
     marginVertical: 10,
     borderRadius: 20,
@@ -188,7 +231,6 @@ const styles = StyleSheet.create({
   
   // Enhanced Banner Section Styles
   bannerSection: {
-    height: 140,
     position: 'relative',
     overflow: 'hidden',
   },
@@ -437,6 +479,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     flex: 1,
     marginRight: 10,
+  },
+  favoriteButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: '#fff1f2',
   },
   addressContainer: {
     flexDirection: 'row',
