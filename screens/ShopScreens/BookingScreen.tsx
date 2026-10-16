@@ -42,6 +42,7 @@ export default function BookingScreen({ route }: { route: BookingServiceRoutePro
   const { showAlert } = useAlert();
 
   const [selectedService, setSelectedService] = useState<number | null>(null);
+  const [selectedKilo, setSelectedKilo] = useState(1);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [payment, setPayment] = useState<PaymentMethod | null>(null);
   const [loading, setLoading] = useState(false);
@@ -493,6 +494,7 @@ useFocusEffect(
                   onPress={() => {
                     if (!serviceEnabled) return;
                     setSelectedService(prev => prev === item.service_id ? null : item.service_id);
+                    setSelectedKilo(1);
                   }}
                   disabled={!serviceEnabled}
                   activeOpacity={serviceEnabled ? 0.9 : 1}
@@ -524,6 +526,35 @@ useFocusEffect(
                     <Text style={styles.descriptionText}>
                       {item.description || 'No description available.'}
                     </Text>
+                    <View style={styles.kiloSelector}>
+                      <Text style={styles.kiloLabel}>Weight:</Text>
+                      <TouchableOpacity
+                        accessibilityLabel="Decrease weight"
+                        accessibilityRole="button"
+                        style={[
+                          styles.kiloButton,
+                          selectedKilo === 1 && styles.kiloButtonDisabled,
+                        ]}
+                        onPress={() => setSelectedKilo((currentKilo) => Math.max(1, currentKilo - 1))}
+                        disabled={selectedKilo === 1}
+                      >
+                        <Text style={styles.kiloButtonText}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.kiloValue}>{selectedKilo}</Text>
+                      <Text style={styles.kiloUnit}>Kilo</Text>
+                      <TouchableOpacity
+                        accessibilityLabel="Increase weight"
+                        accessibilityRole="button"
+                        style={[
+                          styles.kiloButton,
+                          selectedKilo === 9 && styles.kiloButtonDisabled,
+                        ]}
+                        onPress={() => setSelectedKilo((currentKilo) => Math.min(9, currentKilo + 1))}
+                        disabled={selectedKilo === 9}
+                      >
+                        <Text style={styles.kiloButtonText}>+</Text>
+                      </TouchableOpacity>
+                    </View>
                   </Animated.View>
                 )}
               </View>
@@ -820,6 +851,45 @@ const styles = StyleSheet.create({
     color: '#007bff',
   },
   descriptionText: { fontSize: 15, color: "#555", lineHeight: 20 },
+  kiloSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  kiloLabel: {
+    fontSize: 15,
+    color: '#333',
+    marginRight: 12,
+  },
+  kiloButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#d1d5db',
+    borderRadius: 3,
+  },
+  kiloButtonDisabled: {
+    opacity: 0.45,
+  },
+  kiloButtonText: {
+    fontSize: 20,
+    lineHeight: 22,
+    color: '#333',
+    fontWeight: '600',
+  },
+  kiloValue: {
+    minWidth: 28,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  kiloUnit: {
+    fontSize: 15,
+    color: '#333',
+    marginRight: 12,
+  },
   // Date
   dateSelectionRow: {
     flexDirection: 'row',

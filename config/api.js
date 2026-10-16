@@ -4,8 +4,8 @@ import axios from 'axios';
 // switch between different backend origins here
 
 // const DEFAULT_BASE_ORIGIN = 'http://localhost:5000';        // iOS simulator / local
-//const DEFAULT_BASE_ORIGIN = 'http://10.0.2.2:5000';         // Android emulator
-const DEFAULT_BASE_ORIGIN = 'https://api.elaba.tech';      // Hostinger VPS
+const DEFAULT_BASE_ORIGIN = 'http://10.0.2.2:5000';         // Android emulator
+// const DEFAULT_BASE_ORIGIN = 'https://api.elaba.tech';      // Hostinger VPS
 
 // Fallback origins used for recovery when primary origin is unreachable (dev only)
 export const FALLBACK_ORIGINS = [ 

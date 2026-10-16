@@ -32,9 +32,12 @@ export default function ConvoScreen() {
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [actionMessage, setActionMessage] = useState<Message | null>(null);
+  const [actionMenuPlacement, setActionMenuPlacement] = useState<'above' | 'below'>('above');
   const [messageToUnsend, setMessageToUnsend] = useState<Message | null>(null);
   
   const scrollViewRef = useRef<ScrollView>(null);
+  const headerRef = useRef<View>(null);
+  const messageBubbleRefs = useRef<Record<string, View | null>>({});
   const swipeAnimationsRef = useRef<Record<string, Animated.Value>>({});
   const actionMenuAnimation = useRef(new Animated.Value(0)).current;
   const unsendModalAnimation = useRef(new Animated.Value(0)).current;
@@ -450,6 +453,29 @@ export default function ConvoScreen() {
     closeMessageActions();
   };
 
+  const openMessageActionsForBubble = (message: Message, messageKey: string) => {
+    const bubble = messageBubbleRefs.current[messageKey];
+    const header = headerRef.current;
+    const menuHeight = 64;
+
+    const showMenu = (showBelow: boolean) => {
+      setActionMenuPlacement(showBelow ? 'below' : 'above');
+      openMessageActions(message);
+    };
+
+    if (!bubble || !header) {
+      showMenu(false);
+      return;
+    }
+
+    bubble.measureInWindow((_x, bubbleY, _width, bubbleHeight) => {
+      header.measureInWindow((_headerX, headerY, _headerWidth, headerHeight) => {
+        const menuWouldOverlapHeader = bubbleY - menuHeight - 8 <= headerY + headerHeight;
+        showMenu(menuWouldOverlapHeader);
+      });
+    });
+  };
+
   const renderMessage = (message: Message, index: number) => {
     // Convert both to strings for comparison to avoid type issues
     const isMyMessage = message.sender_id.toString() === userId.toString() && message.sender_type === userType;
@@ -532,6 +558,9 @@ export default function ConvoScreen() {
         style={[
           styles.messageContainer,
           isMyMessage ? styles.myMessage : styles.otherMessage,
+          actionMessage && (actionMessage.id ?? actionMessage.message_id) === messageId
+            ? styles.messageContainerWithActions
+            : null,
         ]}
       >
         <Animated.View
@@ -562,10 +591,13 @@ export default function ConvoScreen() {
             }}
             onLongPress={() => {
               if (!message.is_unsent) {
-                openMessageActions(message);
+                openMessageActionsForBubble(message, messageKey);
               }
             }}
             delayLongPress={450}
+            ref={(ref) => {
+              messageBubbleRefs.current[messageKey] = ref;
+            }}
             style={[
             styles.messageBubble,
             message.is_unsent
@@ -607,6 +639,7 @@ export default function ConvoScreen() {
             style={[
               styles.messageActionsMenu,
               isMyMessage ? styles.myMessageActionsMenu : styles.otherMessageActionsMenu,
+              actionMenuPlacement === 'below' && styles.messageActionsMenuBelow,
               {
                 opacity: actionMenuAnimation,
                 transform: [
@@ -619,7 +652,7 @@ export default function ConvoScreen() {
                   {
                     translateY: actionMenuAnimation.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [8, 0],
+                      outputRange: [actionMenuPlacement === 'below' ? -8 : 8, 0],
                     }),
                   },
                 ],
@@ -677,7 +710,10 @@ export default function ConvoScreen() {
       end={{ x: 1, y: 0 }}
       style={styles.container}
     >
-      <View style={[styles.header, { marginTop: insets.top || 40 }]}>
+      <View
+        ref={headerRef}
+        style={[styles.header, { marginTop: insets.top || 40 }]}
+      >
         {/* Back Button */}
         <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
           <Image source={require('../../assets/img/icon/back.png')} style={styles.backIcon} />
@@ -915,6 +951,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     position: 'relative',
   },
+  messageContainerWithActions: {
+    zIndex: 20,
+    elevation: 20,
+  },
   replySwipeHint: {
     position: 'absolute',
     top: '50%',
@@ -1012,12 +1052,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 6,
     marginBottom: 8,
-    zIndex: 20,
+    zIndex: 30,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 10,
-    elevation: 8,
+    elevation: 30,
+  },
+  messageActionsMenuBelow: {
+    top: '100%',
+    bottom: undefined,
+    marginTop: 8,
+    marginBottom: 0,
   },
   myMessageActionsMenu: {
     right: 0,
